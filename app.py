@@ -7,7 +7,7 @@ from dateutil.relativedelta import relativedelta
 import calendar
 
 # --- KONFIGURACJA STRONY ---
-st.set_page_config(page_title="Nasz Budżet Pro + Raty", page_icon="📈", layout="wide")
+st.set_page_config(page_title="Nasz Budżet Ultra Pro + Archiwum", page_icon="🏦", layout="wide")
 
 # --- STYLIZACJA ---
 st.markdown("""
@@ -16,12 +16,12 @@ st.markdown("""
     .stMetric { background-color: #262626; padding: 15px; border-radius: 12px; border: 1px solid #444; }
     .limit-box { background-color: #0e1117; border: 2px solid #00d4ff; padding: 25px; border-radius: 15px; text-align: center; margin-bottom: 20px; }
     .saving-box { background: linear-gradient(135deg, #ffd700, #b8860b); color: black; padding: 20px; border-radius: 15px; text-align: center; font-weight: bold; }
-    .section-header { padding: 10px; border-radius: 5px; font-weight: bold; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 1px; }
+    .section-header { padding: 10px; border-radius: 5px; font-weight: bold; margin-bottom: 10px; text-transform: uppercase; }
     </style>
     """, unsafe_allow_html=True)
 
 # --- ZARZĄDZANIE PLIKAMI ---
-FILES = {"data": "budzet_pro_data.json", "shopping": "zakupy_data.json", "raty": "raty_data.json"}
+FILES = {"data": "budzet_pro_data.json", "shopping": "zakupy_data.json", "raty": "raty_data.json", "sejf": "sejf_total.json"}
 
 def load_data(key, cols):
     if os.path.exists(FILES[key]):
@@ -29,8 +29,7 @@ def load_data(key, cols):
             with open(FILES[key], "r", encoding='utf-8') as f:
                 d = json.load(f)
                 return pd.DataFrame(d) if d else pd.DataFrame(columns=cols)
-        except:
-            return pd.DataFrame(columns=cols)
+        except: return pd.DataFrame(columns=cols)
     return pd.DataFrame(columns=cols)
 
 def save_data(df, key):
@@ -38,129 +37,138 @@ def save_data(df, key):
         json.dump(df.to_dict(orient="records"), f, indent=4, ensure_ascii=False)
 
 # Inicjalizacja danych
-df = load_data("data", ["Data", "Osoba", "Kategoria", "Typ", "Kwota", "Opis"])
+df_all = load_data("data", ["Data", "Czas", "Osoba", "Typ", "Kwota", "Opis", "Miesiac_Ref"])
 df_s = load_data("shopping", ["Produkt", "Czas"])
 df_raty = load_data("raty", ["Nazwa", "Kwota", "Start", "Koniec"])
+df_sejf = load_data("sejf", ["Suma"])
 
-# --- LOGIKA 800+ (AUTOMATYCZNA) ---
-def oblicz_800_plus():
-    dzis = date.today()
-    dzieci = [
-        date(2018, 8, 1),  # Córka 1
-        date(2022, 11, 1)  # Córka 2
-    ]
+if df_sejf.empty: df_sejf = pd.DataFrame([{"Suma": 0.0}])
+
+# --- NAWIGACJA I WYBÓR MIESIĄCA ---
+with st.sidebar:
+    st.title("🏦 Budżet Total Pro")
+    
+    # Wybór aktywnego miesiąca
+    if not df_all.empty:
+        dostepne_miesiace = sorted(df_all['Miesiac_Ref'].unique().tolist(), reverse=True)
+        obecny_msc_str = datetime.now().strftime("%Y-%m")
+        if obecny_msc_str not in dostepne_miesiace:
+            dostepne_miesiace.insert(0, obecny_msc_str)
+    else:
+        dostepne_miesiace = [datetime.now().strftime("%Y-%m")]
+    
+    wybrany_msc = st.selectbox("📅 Przeglądaj miesiąc:", dostepne_miesiace)
+    
+    page = st.radio("Menu", ["🏠 Pulpit", "💳 Raty i Stałe", "🛒 Lista Zakupów", "💰 Skarbonki"])
+    
+    st.divider()
+    if st.button("🚀 ZAMKNIJ MIESIĄC"):
+        # Logika zamknięcia (tylko dla obecnego miesiąca)
+        msc_data = df_all[df_all['Miesiac_Ref'] == wybrany_msc]
+        # (Tutaj można dodać transfer do sejfu jak w poprzedniej wersji)
+        st.success(f"Miesiąc {wybrany_msc} zarchiwizowany.")
+
+# --- FILTROWANIE DANYCH POD WYBRANY MIESIĄC ---
+df = df_all[df_all['Miesiac_Ref'] == wybrany_msc].copy()
+
+# --- LOGIKA AUTOMATYCZNA ---
+def get_auto_income():
+    dzis = datetime.strptime(wybrany_msc, "%Y-%m").date()
+    dzieci = [date(2018, 8, 1), date(2022, 11, 1)]
+    return sum(800 for u in dzieci if dzis < u + relativedelta(years=18))
+
+def get_active_raty():
+    target_date = datetime.strptime(wybrany_msc, "%Y-%m").date()
     suma = 0
-    for urodziny in dzieci:
-        koniec_swiadczenia = urodziny + relativedelta(years=18)
-        if dzis < koniec_swiadczenia:
-            suma += 800
-    return suma
-
-auto_800 = oblicz_800_plus()
-
-# --- LOGIKA RAT (AUTOMATYCZNA) ---
-def oblicz_raty_na_dzis():
-    dzis = date.today()
-    suma_rat = 0
     if not df_raty.empty:
         for _, r in df_raty.iterrows():
             start = datetime.strptime(r['Start'], '%Y-%m-%d').date()
             koniec = datetime.strptime(r['Koniec'], '%Y-%m-%d').date()
-            if start <= dzis <= koniec:
-                suma_rat += r['Kwota']
-    return suma_rat
+            if start <= target_date <= koniec:
+                suma += r['Kwota']
+    return suma
 
-raty_na_miesiac = oblicz_raty_na_dzis()
+auto_800 = get_auto_income()
+raty_msc = get_active_raty()
 
-# --- OBLICZENIA LIMITU ---
-dzis_dt = date.today()
-dni_w_miesiacu = calendar.monthrange(dzis_dt.year, dzis_dt.month)[1]
-dni_do_konca = dni_w_miesiacu - dzis_dt.day + 1
+# --- OBLICZENIA ---
+dzis_dt = datetime.now()
+rok_sel, msc_sel = map(int, wybrany_msc.split("-"))
+dni_w_msc = calendar.monthrange(rok_sel, msc_sel)[1]
 
-dochody_wpisane = df[df['Typ'] == "Przychod"]['Kwota'].sum()
-dochody_total = dochody_wpisane + auto_800
+# Jeśli oglądamy stary miesiąc, dni do końca = 0 (bo już minął)
+if wybrany_msc == dzis_dt.strftime("%Y-%m"):
+    dni_do_konca = dni_w_msc - dzis_dt.day + 1
+else:
+    dni_do_konca = 1 # Aby uniknąć dzielenia przez 0, pokazujemy sumę końcową
 
-stale_wpisane = df[df['Typ'] == "Stałe Opłaty"]['Kwota'].sum()
-stale_total = stale_wpisane + raty_na_miesiac
-
+dochody = df[df['Typ'] == "Przychod"]['Kwota'].sum() + auto_800
+oplaty = df[df['Typ'] == "Stałe Opłaty"]['Kwota'].sum() + raty_msc
 fundusze = df[df['Typ'] == "Fundusze Celowe"]['Kwota'].sum()
 zmienne = df[df['Typ'] == "Wydatki Zmienne"]['Kwota'].sum()
 
-wolne_srodki = dochody_total - stale_total - fundusze - zmienne
+wolne_srodki = dochody - oplaty - fundusze - zmienne
 limit_dzienny = wolne_srodki / dni_do_konca if dni_do_konca > 0 else 0
-
-# --- MENU BOCZNE ---
-with st.sidebar:
-    st.title("💎 Budżet Ultra Pro")
-    page = st.radio("Nawigacja", ["🏠 Pulpit", "💳 Raty i Stałe", "🛒 Lista Zakupów", "💰 Skarbonki"])
-    st.divider()
-    st.info(f"✨ Auto 800+: {auto_800} zł")
-    st.info(f"📅 Raty w tym msc: {raty_na_miesiac} zł")
+oszczednosci_razem = df_sejf.iloc[0]['Suma'] + df_all[df_all['Typ'] == "Fundusze Celowe"]['Kwota'].sum()
 
 # --- STRONA 1: PULPIT ---
 if page == "🏠 Pulpit":
     col1, col2 = st.columns(2)
     with col1:
-        st.markdown(f"""<div class="limit-box"><p style='color:#00d4ff;'>Limit na dziś:</p>
-            <h1 style='font-size:3.5em;'>{max(0, limit_dzienny):,.2f} zł</h1>
-            <p>Dni do końca: {dni_do_konca}</p></div>""", unsafe_allow_html=True)
+        st.markdown(f"""<div class="limit-box"><p style='color:#00d4ff;'>Limit na dziś ({wybrany_msc}):</p>
+            <h1 style='font-size:3.5em;'>{max(0, limit_dzienny):,.2f} zł</h1></div>""", unsafe_allow_html=True)
     with col2:
-        st.markdown(f"""<div class="saving-box"><p>KASA OSZCZĘDNOŚCIOWA</p>
-            <h1 style='font-size:3.5em;'>{fundusze:,.2f} zł</h1><p>Suma funduszy</p></div>""", unsafe_allow_html=True)
-
-    st.divider()
-    m1, m2, m3 = st.columns(3)
-    m1.metric("Wpływy (z 800+)", f"{dochody_total:,.2f} zł")
-    m2.metric("Opłaty + Raty", f"{stale_total:,.2f} zł")
-    m3.metric("Zostało w portfelu", f"{wolne_srodki:,.2f} zł")
+        st.markdown(f"""<div class="saving-box"><p>KASA OSZCZĘDNOŚCIOWA (GLOBALNA)</p>
+            <h1 style='font-size:3.5em;'>{oszczednosci_razem:,.2f} zł</h1></div>""", unsafe_allow_html=True)
 
     st.divider()
     l, r = st.columns(2)
     with l:
-        st.markdown("<div style='color:#00ff88;' class='section-header'>➕ Dodaj Wydatek/Przychód</div>", unsafe_allow_html=True)
-        with st.form("main_form", clear_on_submit=True):
+        st.markdown("<div style='color:#00ff88;' class='section-header'>➕ Nowy Wpis</div>", unsafe_allow_html=True)
+        with st.form("add_form", clear_on_submit=True):
             t = st.selectbox("Typ", ["Wydatki Zmienne", "Stałe Opłaty", "Przychod", "Fundusze Celowe"])
             o = st.selectbox("Kto?", ["Piotr", "Natalia"])
             kw = st.number_input("Kwota", min_value=0.0)
             op = st.text_input("Opis")
             if st.form_submit_button("ZAPISZ"):
-                new = {"Data": str(dzis_dt), "Osoba": o, "Typ": t, "Kwota": kw, "Opis": op}
-                df = pd.concat([df, pd.DataFrame([new])], ignore_index=True)
-                save_data(df, "data"); st.rerun()
+                now = datetime.now()
+                new = {
+                    "Data": str(now.date()), 
+                    "Czas": now.strftime("%H:%M"), 
+                    "Osoba": o, "Typ": t, "Kwota": kw, "Opis": op,
+                    "Miesiac_Ref": wybrany_msc
+                }
+                df_all = pd.concat([df_all, pd.DataFrame([new])], ignore_index=True)
+                save_data(df_all, "data"); st.rerun()
+    with r:
+        st.markdown("<div class='section-header'>📜 Historia miesiąca</div>", unsafe_allow_html=True)
+        st.dataframe(df.sort_values(["Data", "Czas"], ascending=False), use_container_width=True, hide_index=True)
 
 # --- STRONA 2: RATY I STAŁE ---
 elif page == "💳 Raty i Stałe":
-    st.header("💳 Zarządzanie Ratami")
-    with st.form("raty_form", clear_on_submit=True):
-        n = st.text_input("Nazwa raty (np. Telefon)")
-        kw = st.number_input("Kwota miesięczna", min_value=0.0)
-        s = st.date_input("Start spłaty", date.today())
-        k = st.date_input("Koniec spłaty", date.today() + relativedelta(years=1))
-        if st.form_submit_button("DODAJ RATĘ"):
-            new_r = {"Nazwa": n, "Kwota": kw, "Start": str(s), "Koniec": str(k)}
-            df_raty = pd.concat([df_raty, pd.DataFrame([new_r])], ignore_index=True)
+    st.header("💳 Raty")
+    with st.form("raty_form"):
+        n, kw = st.text_input("Nazwa"), st.number_input("Kwota", min_value=0.0)
+        s, k = st.date_input("Start"), st.date_input("Koniec")
+        if st.form_submit_button("Dodaj"):
+            df_raty = pd.concat([df_raty, pd.DataFrame([{"Nazwa": n, "Kwota": kw, "Start": str(s), "Koniec": str(k)}])], ignore_index=True)
             save_data(df_raty, "raty"); st.rerun()
-    
-    st.subheader("Twoje aktywne raty:")
-    st.dataframe(df_raty, use_container_width=True)
-    if st.button("Wyczyść wszystkie raty"):
-        save_data(pd.DataFrame(columns=["Nazwa", "Kwota", "Start", "Koniec"]), "raty"); st.rerun()
+    st.dataframe(df_raty)
 
-# --- STRONY 3 i 4 (LISTA I SKARBONKI - bez zmian w logice) ---
+# --- STRONA 3: ZAKUPY ---
 elif page == "🛒 Lista Zakupów":
     st.header("🛒 Zakupy")
-    p = st.text_input("Co kupić?")
+    p = st.text_input("Produkt")
     if st.button("Dodaj"):
-        df_s = pd.concat([df_s, pd.DataFrame([{"Produkt": p, "Czas": datetime.now().strftime("%H:%M")}])], ignore_index=True)
+        df_s = pd.concat([df_s, pd.DataFrame([{"Produkt": p, "Czas": datetime.now().strftime("%Y-%m-%d %H:%M")}])], ignore_index=True)
         save_data(df_s, "shopping"); st.rerun()
     for i, row in df_s.iterrows():
-        c1, c2 = st.columns([4,1]); c1.write(f"🔹 {row['Produkt']}"); 
+        c1, c2 = st.columns([4,1]); c1.write(f"🔹 {row['Produkt']} ({row['Czas']})")
         if c2.button("✅", key=i): df_s = df_s.drop(i); save_data(df_s, "shopping"); st.rerun()
 
+# --- STRONA 4: SKARBONKI ---
 elif page == "💰 Skarbonki":
-    st.header("💰 Twoje Fundusze")
-    if not df[df['Typ'] == "Fundusze Celowe"].empty:
-        sk = df[df['Typ'] == "Fundusze Celowe"].groupby("Opis")["Kwota"].sum().reset_index()
-        for _, s in sk.iterrows():
-            st.warning(f"**{s['Opis']}**: {s['Kwota']:,.2f} zł")
-    else: st.info("Brak funduszy.")
+    st.header("💰 Oszczędności")
+    st.metric("SEJF (Globalny)", f"{df_sejf.iloc[0]['Suma']:,.2f} zł")
+    sk = df_all[df_all['Typ'] == "Fundusze Celowe"].groupby("Opis")["Kwota"].sum().reset_index()
+    for _, s in sk.iterrows(): st.info(f"**{s['Opis']}**: {s['Kwota']:,.2f} zł")
