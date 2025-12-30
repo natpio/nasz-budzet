@@ -3,12 +3,13 @@ import pandas as pd
 import json
 import os
 from datetime import datetime, date
+from dateutil.relativedelta import relativedelta
 import calendar
 
 # --- KONFIGURACJA STRONY ---
-st.set_page_config(page_title="Nasz Budżet Pro", page_icon="📈", layout="wide")
+st.set_page_config(page_title="Nasz Budżet Pro + Raty", page_icon="📈", layout="wide")
 
-# --- STYLIZACJA (Dark Mode & Professional UI) ---
+# --- STYLIZACJA ---
 st.markdown("""
     <style>
     .main { background-color: #1a1a1a; color: #ffffff; }
@@ -20,7 +21,7 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # --- ZARZĄDZANIE PLIKAMI ---
-FILES = {"data": "budzet_pro_data.json", "shopping": "zakupy_data.json"}
+FILES = {"data": "budzet_pro_data.json", "shopping": "zakupy_data.json", "raty": "raty_data.json"}
 
 def load_data(key, cols):
     if os.path.exists(FILES[key]):
@@ -39,120 +40,127 @@ def save_data(df, key):
 # Inicjalizacja danych
 df = load_data("data", ["Data", "Osoba", "Kategoria", "Typ", "Kwota", "Opis"])
 df_s = load_data("shopping", ["Produkt", "Czas"])
+df_raty = load_data("raty", ["Nazwa", "Kwota", "Start", "Koniec"])
 
-# --- LOGIKA KALENDARZA I LIMITU ---
-dzis = date.today()
-dni_w_miesiacu = calendar.monthrange(dzis.year, dzis.month)[1]
-dni_do_konca = dni_w_miesiacu - dzis.day + 1
+# --- LOGIKA 800+ (AUTOMATYCZNA) ---
+def oblicz_800_plus():
+    dzis = date.today()
+    dzieci = [
+        date(2018, 8, 1),  # Córka 1
+        date(2022, 11, 1)  # Córka 2
+    ]
+    suma = 0
+    for urodziny in dzieci:
+        koniec_swiadczenia = urodziny + relativedelta(years=18)
+        if dzis < koniec_swiadczenia:
+            suma += 800
+    return suma
 
-# Obliczenia finansowe
-dochody = df[df['Typ'] == "Przychod"]['Kwota'].sum()
-stale = df[df['Typ'] == "Stałe Opłaty"]['Kwota'].sum()
+auto_800 = oblicz_800_plus()
+
+# --- LOGIKA RAT (AUTOMATYCZNA) ---
+def oblicz_raty_na_dzis():
+    dzis = date.today()
+    suma_rat = 0
+    if not df_raty.empty:
+        for _, r in df_raty.iterrows():
+            start = datetime.strptime(r['Start'], '%Y-%m-%d').date()
+            koniec = datetime.strptime(r['Koniec'], '%Y-%m-%d').date()
+            if start <= dzis <= koniec:
+                suma_rat += r['Kwota']
+    return suma_rat
+
+raty_na_miesiac = oblicz_raty_na_dzis()
+
+# --- OBLICZENIA LIMITU ---
+dzis_dt = date.today()
+dni_w_miesiacu = calendar.monthrange(dzis_dt.year, dzis_dt.month)[1]
+dni_do_konca = dni_w_miesiacu - dzis_dt.day + 1
+
+dochody_wpisane = df[df['Typ'] == "Przychod"]['Kwota'].sum()
+dochody_total = dochody_wpisane + auto_800
+
+stale_wpisane = df[df['Typ'] == "Stałe Opłaty"]['Kwota'].sum()
+stale_total = stale_wpisane + raty_na_miesiac
+
 fundusze = df[df['Typ'] == "Fundusze Celowe"]['Kwota'].sum()
 zmienne = df[df['Typ'] == "Wydatki Zmienne"]['Kwota'].sum()
 
-# KASA OSZCZĘDNOŚCIOWA (Suma wszystkich funduszy celowych)
-kasa_oszczednosciowa = fundusze
-
-# LIMIT DZIENNY: (Przychod - Stale - Fundusze - Zmienne_z_poprzednich_dni) / dni_do_konca
-wolne_srodki = dochody - stale - fundusze - zmienne
+wolne_srodki = dochody_total - stale_total - fundusze - zmienne
 limit_dzienny = wolne_srodki / dni_do_konca if dni_do_konca > 0 else 0
 
 # --- MENU BOCZNE ---
 with st.sidebar:
-    st.title("💎 Budżet Pro v3.5")
-    page = st.radio("Nawigacja", ["🏠 Pulpit Sterowniczy", "🛒 Lista Zakupów", "💰 Moje Skarbonki", "📜 Pełna Historia"])
+    st.title("💎 Budżet Ultra Pro")
+    page = st.radio("Nawigacja", ["🏠 Pulpit", "💳 Raty i Stałe", "🛒 Lista Zakupów", "💰 Skarbonki"])
     st.divider()
-    if st.button("🗑️ Resetuj Miesiąc"):
-        if st.checkbox("Potwierdzam reset"):
-            save_data(pd.DataFrame(columns=["Data", "Osoba", "Kategoria", "Typ", "Kwota", "Opis"]), "data")
-            st.rerun()
+    st.info(f"✨ Auto 800+: {auto_800} zł")
+    st.info(f"📅 Raty w tym msc: {raty_na_miesiac} zł")
 
 # --- STRONA 1: PULPIT ---
-if page == "🏠 Pulpit Sterowniczy":
-    col1, col2 = st.columns([1, 1])
-    
+if page == "🏠 Pulpit":
+    col1, col2 = st.columns(2)
     with col1:
-        st.markdown(f"""<div class="limit-box">
-            <p style='color: #00d4ff; margin:0; font-size: 1.2em;'>Limit na dziś:</p>
-            <h1 style='margin:0; font-size: 3.5em;'>{max(0, limit_dzienny):,.2f} zł</h1>
-            <p style='margin:0; color: gray;'>Dni do końca miesiąca: {dni_do_konca}</p>
-        </div>""", unsafe_allow_html=True)
-
+        st.markdown(f"""<div class="limit-box"><p style='color:#00d4ff;'>Limit na dziś:</p>
+            <h1 style='font-size:3.5em;'>{max(0, limit_dzienny):,.2f} zł</h1>
+            <p>Dni do końca: {dni_do_konca}</p></div>""", unsafe_allow_html=True)
     with col2:
-        st.markdown(f"""<div class="saving-box">
-            <p style='margin:0; font-size: 1.2em;'>KASA OSZCZĘDNOŚCIOWA</p>
-            <h1 style='margin:0; font-size: 3.5em;'>{kasa_oszczednosciowa:,.2f} zł</h1>
-            <p style='margin:0;'>Suma wszystkich funduszy</p>
-        </div>""", unsafe_allow_html=True)
+        st.markdown(f"""<div class="saving-box"><p>KASA OSZCZĘDNOŚCIOWA</p>
+            <h1 style='font-size:3.5em;'>{fundusze:,.2f} zł</h1><p>Suma funduszy</p></div>""", unsafe_allow_html=True)
 
     st.divider()
-
-    # Statystyki w pigułce
     m1, m2, m3 = st.columns(3)
-    m1.metric("Wpływy", f"{dochody:,.2f} zł")
-    m2.metric("Opłaty stałe", f"{stale:,.2f} zł")
-    m3.metric("Pozostało w portfelu", f"{wolne_srodki:,.2f} zł")
+    m1.metric("Wpływy (z 800+)", f"{dochody_total:,.2f} zł")
+    m2.metric("Opłaty + Raty", f"{stale_total:,.2f} zł")
+    m3.metric("Zostało w portfelu", f"{wolne_srodki:,.2f} zł")
 
     st.divider()
-
-    # Formularz dodawania
-    l_col, r_col = st.columns([1, 1])
-    with l_col:
-        st.markdown("<div style='color:#00ff88;' class='section-header'>➕ Nowy Wpis</div>", unsafe_allow_html=True)
+    l, r = st.columns(2)
+    with l:
+        st.markdown("<div style='color:#00ff88;' class='section-header'>➕ Dodaj Wydatek/Przychód</div>", unsafe_allow_html=True)
         with st.form("main_form", clear_on_submit=True):
-            typ = st.selectbox("Co to za ruch?", ["Wydatki Zmienne", "Stałe Opłaty", "Przychod", "Fundusze Celowe"])
-            osoba = st.selectbox("Kto?", ["Piotr", "Natalia"])
-            kwota = st.number_input("Kwota (zł)", min_value=0.0, step=0.01)
-            opis = st.text_input("Nazwa / Opis (np. Mieszkanie, Bonus, Paliwo)")
-            if st.form_submit_button("ZATWIERDŹ"):
-                nowy = {"Data": str(dzis), "Osoba": osoba, "Typ": typ, "Kwota": kwota, "Opis": opis}
-                df = pd.concat([df, pd.DataFrame([nowy])], ignore_index=True)
-                save_data(df, "data")
-                st.rerun()
+            t = st.selectbox("Typ", ["Wydatki Zmienne", "Stałe Opłaty", "Przychod", "Fundusze Celowe"])
+            o = st.selectbox("Kto?", ["Piotr", "Natalia"])
+            kw = st.number_input("Kwota", min_value=0.0)
+            op = st.text_input("Opis")
+            if st.form_submit_button("ZAPISZ"):
+                new = {"Data": str(dzis_dt), "Osoba": o, "Typ": t, "Kwota": kw, "Opis": op}
+                df = pd.concat([df, pd.DataFrame([new])], ignore_index=True)
+                save_data(df, "data"); st.rerun()
 
-    with r_col:
-        st.markdown("<div style='color:#ffaa00;' class='section-header'>📊 Wydatki wg Typu</div>", unsafe_allow_html=True)
-        if not df.empty:
-            wykres_data = df.groupby("Typ")["Kwota"].sum()
-            st.bar_chart(wykres_data)
-        else:
-            st.info("Brak danych do wykresu.")
+# --- STRONA 2: RATY I STAŁE ---
+elif page == "💳 Raty i Stałe":
+    st.header("💳 Zarządzanie Ratami")
+    with st.form("raty_form", clear_on_submit=True):
+        n = st.text_input("Nazwa raty (np. Telefon)")
+        kw = st.number_input("Kwota miesięczna", min_value=0.0)
+        s = st.date_input("Start spłaty", date.today())
+        k = st.date_input("Koniec spłaty", date.today() + relativedelta(years=1))
+        if st.form_submit_button("DODAJ RATĘ"):
+            new_r = {"Nazwa": n, "Kwota": kw, "Start": str(s), "Koniec": str(k)}
+            df_raty = pd.concat([df_raty, pd.DataFrame([new_r])], ignore_index=True)
+            save_data(df_raty, "raty"); st.rerun()
+    
+    st.subheader("Twoje aktywne raty:")
+    st.dataframe(df_raty, use_container_width=True)
+    if st.button("Wyczyść wszystkie raty"):
+        save_data(pd.DataFrame(columns=["Nazwa", "Kwota", "Start", "Koniec"]), "raty"); st.rerun()
 
-# --- STRONA 2: ZAKUPY ---
+# --- STRONY 3 i 4 (LISTA I SKARBONKI - bez zmian w logice) ---
 elif page == "🛒 Lista Zakupów":
-    st.markdown("<h1 class='header-text'>🛒 Lista Zakupów</h1>", unsafe_allow_html=True)
-    c_in, _ = st.columns([2, 1])
-    with c_in:
-        nowy_p = st.text_input("Dopisz do listy...")
-        if st.button("Dodaj ➕"):
-            if nowy_p:
-                nowy_wpis_s = {"Produkt": nowy_p, "Czas": datetime.now().strftime("%H:%M")}
-                df_s = pd.concat([df_s, pd.DataFrame([nowy_wpis_s])], ignore_index=True)
-                save_data(df_s, "shopping"); st.rerun()
-
-    st.divider()
+    st.header("🛒 Zakupy")
+    p = st.text_input("Co kupić?")
+    if st.button("Dodaj"):
+        df_s = pd.concat([df_s, pd.DataFrame([{"Produkt": p, "Czas": datetime.now().strftime("%H:%M")}])], ignore_index=True)
+        save_data(df_s, "shopping"); st.rerun()
     for i, row in df_s.iterrows():
-        c1, c2 = st.columns([4, 1])
-        c1.write(f"🔹 **{row['Produkt']}** (Dodano: {row['Czas']})")
-        if c2.button("✅ Kupione", key=f"s_{i}"):
-            df_s = df_s.drop(i); save_data(df_s, "shopping"); st.rerun()
+        c1, c2 = st.columns([4,1]); c1.write(f"🔹 {row['Produkt']}"); 
+        if c2.button("✅", key=i): df_s = df_s.drop(i); save_data(df_s, "shopping"); st.rerun()
 
-# --- STRONA 3: SKARBONKI ---
-elif page == "💰 Moje Skarbonki":
-    st.markdown("<h1 class='header-text'>💰 Fundusze Celowe</h1>", unsafe_allow_html=True)
+elif page == "💰 Skarbonki":
+    st.header("💰 Twoje Fundusze")
     if not df[df['Typ'] == "Fundusze Celowe"].empty:
-        skarbonki = df[df['Typ'] == "Fundusze Celowe"].groupby("Opis")["Kwota"].sum().reset_index()
-        for _, s in skarbonki.iterrows():
-            st.markdown(f"""
-                <div style='background-color:#262626; padding:15px; border-radius:10px; border-left: 5px solid #ffd700; margin-bottom:10px;'>
-                    <span style='font-size:1.2em;'>{s['Opis']}</span>: <b style='font-size:1.5em; color:#ffd700;'>{s['Kwota']:,.2f} zł</b>
-                </div>
-            """, unsafe_allow_html=True)
-    else:
-        st.info("Nie masz jeszcze żadnych skarbonek. Dodaj je w Pulpicie jako 'Fundusze Celowe'.")
-
-# --- STRONA 4: HISTORIA ---
-elif page == "📜 Pełna Historia":
-    st.markdown("<h1 class='header-text'>📜 Historia Transakcji</h1>", unsafe_allow_html=True)
-    st.dataframe(df.sort_values("Data", ascending=False), use_container_width=True, hide_index=True)
+        sk = df[df['Typ'] == "Fundusze Celowe"].groupby("Opis")["Kwota"].sum().reset_index()
+        for _, s in sk.iterrows():
+            st.warning(f"**{s['Opis']}**: {s['Kwota']:,.2f} zł")
+    else: st.info("Brak funduszy.")
