@@ -1,0 +1,18 @@
+{
+    "oszczednosci_suma": 0.0,
+    "miesiace": {
+        "2025-12": {
+            "dochody": {
+                "800+ (Auto)": 1600
+            },
+            "oplaty_stale": {},
+            "okazje": {},
+            "wydatki_zmienne": {},
+            "planowane_oszczednosci": 0.0,
+            "czy_zamkniety": false
+        }
+    },
+    "sub_konta": {},
+    "cele_meta": {},
+    "harmonogram_rat": []
+}
