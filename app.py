@@ -2,124 +2,113 @@ import streamlit as st
 import pandas as pd
 import json
 import os
-from datetime import datetime
+from datetime import datetime, date
+import calendar
 
-# --- KONFIGURACJA STRONY ---
-st.set_page_config(page_title="Nasz Budżet Premium", page_icon="💰", layout="wide")
+# --- KONFIGURACJA ---
+st.set_page_config(page_title="Nasz Budżet Pro", page_icon="📈", layout="wide")
 
-# --- STYLIZACJA CSS ---
+# --- STYLIZACJA (Dark Mode & Colors) ---
 st.markdown("""
     <style>
-    .stMetric { background-color: #ffffff; padding: 15px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); border: 1px solid #eee; }
-    .header-text { text-align: center; color: #1e1e1e; font-family: 'Segoe UI', sans-serif; }
-    .balance-card { background: linear-gradient(135deg, #007bff, #00d4ff); color: white; padding: 20px; border-radius: 15px; text-align: center; margin-bottom: 20px; }
+    .main { background-color: #1a1a1a; color: #ffffff; }
+    .stMetric { background-color: #262626; padding: 15px; border-radius: 12px; border: 1px solid #444; }
+    .limit-box { background-color: #0e1117; border: 2px solid #00d4ff; padding: 20px; border-radius: 15px; text-align: center; }
+    .section-header { padding: 10px; border-radius: 5px; font-weight: bold; margin-bottom: 10px; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- FUNKCJE DANYCH ---
-BUDGET_FILE = "budzet_data.json"
-SHOPPING_FILE = "zakupy_data.json"
+# --- LOGIKA DANYCH ---
+FILES = {"data": "budzet_pro_data.json", "shopping": "zakupy_data.json"}
 
-def load_data(file, columns):
-    if os.path.exists(file):
-        try:
-            with open(file, "r", encoding='utf-8') as f:
-                data = json.load(f)
-                return pd.DataFrame(data) if data else pd.DataFrame(columns=columns)
-        except:
-            return pd.DataFrame(columns=columns)
-    return pd.DataFrame(columns=columns)
+def load_data(key, cols):
+    if os.path.exists(FILES[key]):
+        with open(FILES[key], "r", encoding='utf-8') as f:
+            d = json.load(f)
+            return pd.DataFrame(d) if d else pd.DataFrame(columns=cols)
+    return pd.DataFrame(columns=cols)
 
-def save_data(df, file):
-    with open(file, "w", encoding='utf-8') as f:
+def save_data(df, key):
+    with open(FILES[key], "w", encoding='utf-8') as f:
         json.dump(df.to_dict(orient="records"), f, indent=4, ensure_ascii=False)
 
-# Inicjalizacja danych
-df_all = load_data(BUDGET_FILE, ["Data", "Osoba", "Kategoria", "Typ", "Kwota", "Opis"])
-df_shopping = load_data(SHOPPING_FILE, ["Produkt", "Czas"])
+# Inicjalizacja
+df = load_data("data", ["Data", "Osoba", "Kategoria", "Typ", "Kwota", "Opis"])
+df_s = load_data("shopping", ["Produkt", "Czas"])
 
-# --- NAWIGACJA ---
-with st.sidebar:
-    st.title("💎 Menu")
-    page = st.radio("Wybierz:", ["📊 Portfel & Statystyki", "🛒 Lista Zakupów"])
-    st.divider()
-    st.write("Witajcie, Piotr i Natalia! 👋")
+# --- OBLICZENIA BUDŻETOWE ---
+dzis = date.today()
+dni_w_miesiacu = calendar.monthrange(dzis.year, dzis.month)[1]
+dni_do_konca = dni_w_miesiacu - dzis.day + 1
 
-# --- SEKCJA 1: PORTFEL ---
-if page == "📊 Portfel & Statystyki":
-    st.markdown("<h1 class='header-text'>💎 Nasz Sejf Finansowy</h1>", unsafe_allow_html=True)
+dochody = df[df['Typ'] == "Przychod"]['Kwota'].sum()
+stale = df[df['Typ'] == "Stałe Opłaty"]['Kwota'].sum()
+fundusze = df[df['Typ'] == "Fundusze Celowe"]['Kwota'].sum()
+zmienne = df[df['Typ'] == "Wydatki Zmienne"]['Kwota'].sum()
+
+# Magia limitu dziennego
+dostepna_kasa = dochody - stale - fundusze - zmienne
+limit_dzienny = dostepna_kasa / dni_do_konca if dni_do_konca > 0 else 0
+
+# --- INTERFEJS ---
+st.sidebar.title("💎 Budżet Pro v3")
+page = st.sidebar.radio("Nawigacja", ["🏠 Panel Sterowania", "🛒 Lista Zakupów", "📜 Historia"])
+
+if page == "🏠 Panel Sterowania":
+    # GÓRNY PANEL (LIMIT)
+    c1, c2 = st.columns([1, 2])
+    with c1:
+        st.markdown(f"""<div class="limit-box">
+            <p style='color: #00d4ff; margin:0;'>Dziś możecie wydać:</p>
+            <h1 style='margin:0; font-size: 2.5em;'>{max(0, limit_dzienny):,.2f} zł</h1>
+            <small>Dni do końca miesiąca: {dni_do_konca}</small>
+        </div>""", unsafe_allow_html=True)
     
-    # OBLICZENIA SALDA
-    if not df_all.empty:
-        dochody = df_all[df_all['Typ'] == "Dochód"]['Kwota'].sum()
-        wydatki = df_all[df_all['Typ'] == "Wydatek"]['Kwota'].sum()
-    else:
-        dochody, wydatki = 0, 0
-    saldo = dochody - wydatki
-
-    # PANEL GŁÓWNY (SALDO)
-    st.markdown(f"""
-        <div class="balance-card">
-            <h2 style='margin:0;'>Aktualne Saldo</h2>
-            <h1 style='margin:0; font-size: 3em;'>{saldo:,.2f} zł</h1>
-        </div>
-    """, unsafe_allow_html=True)
-
-    col1, col2 = st.columns(2)
-    with col1: st.metric("Łączne Dochody", f"{dochody:,.2f} zł", delta_color="normal")
-    with col2: st.metric("Łączne Wydatki", f"-{wydatki:,.2f} zł", delta_color="inverse")
+    with c2:
+        col_a, col_b, col_c = st.columns(3)
+        col_a.metric("Przychody", f"{dochody:,.0f} zł")
+        col_b.metric("Stałe/Fundusze", f"{stale+fundusze:,.0f} zł", delta_color="inverse")
+        col_b.write(f"Zostało: {dostepna_kasa:,.2f} zł")
 
     st.divider()
 
-    left, right = st.columns([1, 2])
-
-    with left:
-        st.subheader("➕ Nowy Wpis")
-        with st.form("finance_form", clear_on_submit=True):
-            typ = st.radio("Co dodajemy?", ["Wydatek", "Dochód"])
-            data = st.date_input("Data", datetime.now())
-            osoba = st.selectbox("Kto?", ["Piotr", "Natalia"])
-            
-            if typ == "Wydatek":
-                kat = st.selectbox("Kategoria", ["🏠 Dom", "🛒 Jedzenie", "🚗 Transport", "🎭 Rozrywka", "✨ Inne"])
-            else:
-                kat = st.selectbox("Kategoria", ["💰 Wypłata", "🎁 Prezent", "📈 Inne"])
-                
-            kwota = st.number_input("Kwota (zł)", min_value=0.0)
-            opis = st.text_input("Notatka")
-            
-            if st.form_submit_button("Zatwierdź ✅"):
-                new_row = {"Data": str(data), "Osoba": osoba, "Kategoria": kat, "Typ": typ, "Kwota": kwota, "Opis": opis}
-                df_all = pd.concat([df_all, pd.DataFrame([new_row])], ignore_index=True)
-                save_data(df_all, BUDGET_FILE)
-                st.success("Zapisano!")
+    # SEKCJE DODAWANIA
+    col_l, col_r = st.columns(2)
+    
+    with col_l:
+        st.markdown("<div style='color:#00ff88;' class='section-header'>➕ DODAJ WPIS</div>", unsafe_allow_html=True)
+        with st.form("main_form", clear_on_submit=True):
+            t = st.selectbox("Typ wpisu", ["Wydatki Zmienne", "Stałe Opłaty", "Przychod", "Fundusze Celowe"])
+            o = st.selectbox("Kto?", ["Piotr", "Natalia"])
+            kw = st.number_input("Kwota", min_value=0.0)
+            op = st.text_input("Opis / Nazwa")
+            if st.form_submit_button("ZATWIERDŹ"):
+                new = {"Data": str(dzis), "Osoba": o, "Typ": t, "Kwota": kw, "Opis": op}
+                df = pd.concat([df, pd.DataFrame([new])], ignore_index=True)
+                save_data(df, "data")
                 st.rerun()
 
-    with right:
-        st.subheader("📈 Historia Ruchów")
-        if not df_all.empty:
-            st.dataframe(df_all.sort_values("Data", ascending=False), use_container_width=True, hide_index=True)
-            st.bar_chart(df_all[df_all['Typ'] == "Wydatek"].groupby("Kategoria")["Kwota"].sum())
+    with col_r:
+        st.markdown("<div style='color:#ffaa00;' class='section-header'>📊 STRUKTURA MIESIĄCA</div>", unsafe_allow_html=True)
+        if not df.empty:
+            summary = df.groupby("Typ")["Kwota"].sum()
+            st.bar_chart(summary)
         else:
-            st.info("Brak danych do wyświetlenia.")
+            st.info("Dodaj pierwszy przychód lub wydatek!")
 
-# --- SEKCJA 2: LISTA ZAKUPÓW ---
 elif page == "🛒 Lista Zakupów":
-    st.markdown("<h1 class='header-text'>🛒 Lista Zakupów</h1>", unsafe_allow_html=True)
-    with st.container(border=True):
-        new_item = st.text_input("Co dopisać?")
-        if st.button("Dodaj ➕"):
-            if new_item:
-                new_entry = {"Produkt": new_item, "Czas": datetime.now().strftime("%d.%m | %H:%M")}
-                df_shopping = pd.concat([df_shopping, pd.DataFrame([new_entry])], ignore_index=True)
-                save_data(df_shopping, SHOPPING_FILE)
-                st.rerun()
+    st.title("🛒 Zakupy")
+    new_s = st.text_input("Dopisz produkt...")
+    if st.button("Dodaj"):
+        df_s = pd.concat([df_s, pd.DataFrame([{"Produkt": new_s, "Czas": datetime.now().strftime("%H:%M")}])], ignore_index=True)
+        save_data(df_s, "shopping"); st.rerun()
     
-    for index, row in df_shopping.iterrows():
+    for i, row in df_s.iterrows():
         c1, c2 = st.columns([4, 1])
-        with c1: st.write(f"**{row['Produkt']}** (Dodano: {row['Czas']})")
-        with c2: 
-            if st.button("✅", key=f"s_{index}"):
-                df_shopping = df_shopping.drop(index)
-                save_data(df_shopping, SHOPPING_FILE)
-                st.rerun()
+        c1.write(f"**{row['Produkt']}** ({row['Czas']})")
+        if c2.button("✅", key=f"s_{i}"):
+            df_s = df_s.drop(i); save_data(df_s, "shopping"); st.rerun()
+
+elif page == "📜 Historia":
+    st.title("📜 Wszystkie operacje")
+    st.dataframe(df.sort_values("Data", ascending=False), use_container_width=True)
