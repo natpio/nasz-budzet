@@ -7,19 +7,60 @@ import calendar
 from dateutil.relativedelta import relativedelta
 import plotly.express as px
 
-# --- KONFIGURACJA ---
-st.set_page_config(page_title="Budżet Rodzinny 3.5", layout="wide")
+# --- KONFIGURACJA I WYRAŹNE STYLE (v3.6) ---
+st.set_page_config(page_title="Budżet Rodzinny 3.6", layout="wide")
 
 st.markdown("""
     <style>
+    /* Tło główne */
     .main { background-color: #0e1117; color: white; }
-    .stMetric { background-color: #1c1f26; padding: 15px; border-radius: 10px; border: 1px solid #333; }
-    .minus-alert { background-color: #3e0b0b; border: 1px solid #ff4b4b; padding: 15px; border-radius: 10px; margin-bottom: 20px; text-align: center; font-weight: bold; }
+    
+    /* Naprawa czytelności Metric */
+    [data-testid="stMetric"] {
+        background-color: #1c1f26;
+        padding: 15px;
+        border-radius: 10px;
+        border: 1px solid #333;
+    }
+
+    /* Czytelne etykiety (napisy nad kwotami) */
+    [data-testid="stMetricLabel"] > div {
+        color: #ffffff !important;
+        font-size: 1rem !important;
+        opacity: 1 !important;
+    }
+    
+    /* Jasne, wyraźne kwoty */
+    [data-testid="stMetricValue"] > div {
+        color: #00ff88 !important; /* Jasnozielony dla wartości */
+        font-weight: bold !important;
+    }
+
+    /* Alert deficytu */
+    .minus-alert { 
+        background-color: #3e0b0b; 
+        border: 1px solid #ff4b4b; 
+        padding: 15px; 
+        border-radius: 10px; 
+        margin-bottom: 20px; 
+        text-align: center; 
+        font-weight: bold;
+        color: white;
+    }
+    
+    /* Poprawa widoczności tekstu w expanderach */
+    .st-ae { color: white !important; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- BAZA DANYCH ---
-FILES = {"transakcje": "db_transakcje.json", "stale": "db_stale.json", "raty": "db_raty.json", "kasa": "db_kasa.json", "zakupy": "db_zakupy.json"}
+# --- ZARZĄDZANIE BAZĄ DANYCH ---
+FILES = {
+    "transakcje": "db_transakcje.json",
+    "stale": "db_stale.json",
+    "raty": "db_raty.json",
+    "kasa": "db_kasa.json",
+    "zakupy": "db_zakupy.json"
+}
 
 def load_db(key, default):
     if os.path.exists(FILES[key]):
@@ -31,12 +72,14 @@ def load_db(key, default):
 def save_db(key, data):
     with open(FILES[key], "w", encoding='utf-8') as f: json.dump(data, f, indent=4, ensure_ascii=False)
 
+# Inicjalizacja danych
 transakcje = load_db("transakcje", [])
 oplaty_stale = load_db("stale", [])
 raty = load_db("raty", [])
 kasa_oszcz = load_db("kasa", {"nadwyzki": 0.0, "historia_zamkniec": []})
 lista_zakupow = load_db("zakupy", [])
 
+# --- LOGIKA ŚWIADCZEŃ ---
 def oblicz_800plus(data_widoku):
     laura, zosia = date(2018, 8, 1), date(2022, 11, 1)
     suma = 0
@@ -44,14 +87,19 @@ def oblicz_800plus(data_widoku):
     if data_widoku < zosia + relativedelta(years=18): suma += 800
     return suma
 
+# --- NAWIGACJA SIDEBAR ---
 with st.sidebar:
-    st.title("🏦 Budżet 3.5")
-    wybrany_miesiac = st.selectbox("Miesiąc", pd.date_range(start="2024-01-01", periods=36, freq='MS').strftime("%Y-%m").tolist(),
-        index=pd.date_range(start="2024-01-01", periods=36, freq='MS').strftime("%Y-%m").tolist().index(datetime.now().strftime("%Y-%m")))
-    menu = st.radio("Nawigacja", ["🏠 Pulpit", "⚙️ Stałe i Raty", "🛒 Lista Zakupów", "📊 Statystyki i Kasa"])
+    st.title("🏦 Menu Główne")
+    wybrany_miesiac = st.selectbox("Wybierz Miesiąc", 
+        pd.date_range(start="2024-01-01", periods=36, freq='MS').strftime("%Y-%m").tolist(),
+        index=pd.date_range(start="2024-01-01", periods=36, freq='MS').strftime("%Y-%m").tolist().index(datetime.now().strftime("%Y-%m"))
+    )
+    menu = st.radio("Sekcja:", ["🏠 Pulpit", "⚙️ Stałe i Raty", "🛒 Lista Zakupów", "📊 Statystyki i Kasa"])
 
 sel_dt = datetime.strptime(wybrany_miesiac, "%Y-%m").date()
 suma_800 = oblicz_800plus(sel_dt)
+
+# --- OBLICZENIA MIESIĘCZNE ---
 msc_dochody_total = sum(t['kwota'] for t in transakcje if t['miesiac'] == wybrany_miesiac and t['typ'] == "Wynagrodzenie") + suma_800
 msc_zmienne = sum(t['kwota'] for t in transakcje if t['miesiac'] == wybrany_miesiac and t['typ'] == "Wydatek Zmienny")
 msc_stale = sum(s['kwota'] for s in oplaty_stale)
@@ -61,10 +109,12 @@ msc_oszcz_celowe = sum(t['kwota'] for t in transakcje if t['miesiac'] == wybrany
 dostepne_środki = msc_dochody_total - (msc_zmienne + msc_stale + msc_raty + msc_oszcz_celowe)
 aktualna_kasa = kasa_oszcz['nadwyzki'] + sum(t['kwota'] for t in transakcje if t['typ'] == "Oszczędność Celowa")
 
+# --- STRONA 1: PULPIT ---
 if menu == "🏠 Pulpit":
     c1, c2, c3 = st.columns(3)
     c1.metric("Portfel (Miesiąc)", f"{dostepne_środki:,.2f} zł")
     c2.metric("Kasa Oszczędnościowa", f"{aktualna_kasa:,.2f} zł")
+    
     dni_w_msc = calendar.monthrange(sel_dt.year, sel_dt.month)[1]
     dzis = datetime.now()
     poz_dni = (dni_w_msc - dzis.day + 1) if dzis.strftime("%Y-%m") == wybrany_miesiac else dni_w_msc
@@ -80,6 +130,7 @@ if menu == "🏠 Pulpit":
     st.divider()
     col_a, col_b = st.columns(2)
     with col_a:
+        st.subheader("➕ Dodaj wpis")
         with st.form("add_f", clear_on_submit=True):
             t_typ = st.selectbox("Typ", ["Wydatek Zmienny", "Wynagrodzenie", "Oszczędność Celowa"])
             t_kw, t_op = st.number_input("Kwota", min_value=0.0), st.text_input("Opis")
@@ -87,7 +138,8 @@ if menu == "🏠 Pulpit":
                 transakcje.append({"id": str(datetime.now().timestamp()), "miesiac": wybrany_miesiac, "typ": t_typ, "kwota": t_kw, "opis": t_op, "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M")})
                 save_db("transakcje", transakcje); st.rerun()
     with col_b:
-        if st.button("🏁 Zamknij miesiąc (Saldo -> Kasa)"):
+        st.subheader("🏁 Finisz")
+        if st.button("Zamknij miesiąc (Przelew do Kasy)"):
             if dostepne_środki > 0:
                 kasa_oszcz['nadwyzki'] += dostepne_środki
                 kasa_oszcz['historia_zamkniec'].append({"data": datetime.now().strftime("%Y-%m-%d %H:%M"), "typ": "ZAMKNIĘCIE", "kwota": dostepne_środki, "opis": f"Miesiąc {wybrany_miesiac}"})
@@ -104,13 +156,14 @@ if menu == "🏠 Pulpit":
             if st.button("🗑️ Usuń", key=f"d_{t['id']}"):
                 transakcje = [x for x in transakcje if x['id'] != t['id']]; save_db("transakcje", transakcje); st.rerun()
 
+# --- STRONA: STATYSTYKI I KASA ---
 elif menu == "📊 Statystyki i Kasa":
     st.header("📊 Analiza Realna (bez prognoz)")
     df = pd.DataFrame(transakcje)
     
     if not df.empty:
         dzis = datetime.now()
-        # Logika: ile miesięcy w roku faktycznie minęło
+        # Ile miesięcy w roku faktycznie minęło
         if sel_dt.year == dzis.year: ile_msc = dzis.month
         elif sel_dt.year < dzis.year: ile_msc = 12
         else: ile_msc = 0
@@ -120,17 +173,17 @@ elif menu == "📊 Statystyki i Kasa":
         realne_wydatki = df[(df['typ'] == "Wydatek Zmienny") & (~df['opis'].str.contains("Zamknięcie", na=False)) & (df['miesiac'].str.startswith(str(sel_dt.year)))]['kwota'].sum() + (msc_stale * ile_msc)
         
         c_st1, c_st2 = st.columns(2)
-        c_st1.metric(f"Realne Dochody ({sel_dt.year})", f"{realne_dochody:,.2f} zł", help="Suma wpisanych wynagrodzeń + 800+ za miesiące które minęły")
-        c_st2.metric(f"Realne Wydatki ({sel_dt.year})", f"{realne_wydatki:,.2f} zł", help="Suma wydatków zmiennych i stałych za miesiące które minęły")
+        c_st1.metric(f"Dochody ({sel_dt.year})", f"{realne_dochody:,.2f} zł")
+        c_st2.metric(f"Wydatki ({sel_dt.year})", f"{realne_wydatki:,.2f} zł")
         
-        fig_pie = px.pie(df[~df['opis'].str.contains("Zamknięcie", na=False) & (df['typ'] != "Wynagrodzenie")], values='kwota', names='typ', title="Twoje Wydatki")
+        fig_pie = px.pie(df[~df['opis'].str.contains("Zamknięcie", na=False) & (df['typ'] != "Wynagrodzenie")], values='kwota', names='typ', title="Struktura Wydatków")
         st.plotly_chart(fig_pie)
 
     st.subheader("🛠️ Korekta Kasy")
-    with st.expander("Skoryguj stan Kasy"):
+    with st.expander("Skoryguj stan Sejfu"):
         ck1, ck2, ck3 = st.columns([2, 2, 3])
         k_kw, k_ak, k_po = ck1.number_input("Kwota", min_value=0.0), ck2.selectbox("Akcja", ["Odejmij", "Dodaj"]), ck3.text_input("Powód")
-        if st.button("Wykonaj"):
+        if st.button("Wykonaj korektę"):
             val = k_kw if k_ak == "Dodaj" else -k_kw
             kasa_oszcz['nadwyzki'] += val
             kasa_oszcz['historia_zamkniec'].append({"data": datetime.now().strftime("%Y-%m-%d %H:%M"), "typ": "KOREKTA", "kwota": val, "opis": k_po})
@@ -140,6 +193,7 @@ elif menu == "📊 Statystyki i Kasa":
         st.subheader("📁 Historia operacji na Kasie")
         st.table(pd.DataFrame(kasa_oszcz['historia_zamkniec']).sort_values(by="data", ascending=False))
 
+# --- RESZTA (Lista Zakupów, Stałe) ---
 elif menu == "🛒 Lista Zakupów":
     st.header("🛒 Lista Zakupów")
     with st.form("sh"):
@@ -154,7 +208,7 @@ elif menu == "🛒 Lista Zakupów":
             lista_zakupow = [x for x in lista_zakupow if x['id'] != p['id']]; save_db("zakupy", lista_zakupow); st.rerun()
 
 elif menu == "⚙️ Stałe i Raty":
-    st.header("⚙️ Stałe i Raty")
+    st.header("⚙️ Stałe opłaty i Raty")
     col1, col2 = st.columns(2)
     with col1:
         with st.form("s"):
