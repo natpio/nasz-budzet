@@ -6,139 +6,186 @@ from datetime import datetime, date
 from dateutil.relativedelta import relativedelta
 import calendar
 
-# --- KONFIGURACJA STRONY ---
-st.set_page_config(page_title="Budżet Pro - Naprawa Usuwania", page_icon="🏦", layout="wide")
+# --- KONFIGURACJA ---
+st.set_page_config(page_title="Budżet Pro Piotr & Natalia", page_icon="🏦", layout="wide")
 
-# --- STYLIZACJA (WYSOKI KONTRAST + CZYTELNOŚĆ) ---
+# --- STYLIZACJA (WYSOKI KONTRAST) ---
 st.markdown("""
     <style>
     .main { background-color: #0e1117; color: #ffffff; }
-    .stMetric { background-color: #1c1f26; padding: 15px; border-radius: 12px; border: 1px solid #444; color: #ffffff; }
-    .section-header { padding: 10px; border-radius: 8px; font-weight: bold; margin-top: 15px; text-transform: uppercase; font-size: 1.1em; }
-    .sub-summary { font-size: 1.05em; font-weight: bold; margin-bottom: 12px; padding: 12px; border-radius: 10px; border: 1px solid #555; color: #ffffff !important; }
-    
-    /* Poprawa widoczności wpisów */
+    .stMetric { background-color: #1c1f26; padding: 15px; border-radius: 12px; border: 1px solid #444; }
+    .header-wplywy { background-color: #00d4ff; color: black; padding: 12px; border-radius: 8px; font-weight: bold; text-transform: uppercase; margin-top: 10px; }
+    .header-wydatki { background-color: #ff4b4b; color: white; padding: 12px; border-radius: 8px; font-weight: bold; text-transform: uppercase; margin-top: 10px; }
     .stExpander { border: 1px solid #555 !important; background-color: #1c1f26 !important; margin-bottom: 8px !important; }
     div[data-testid="stExpander"] p { color: white !important; font-size: 1.1em; font-weight: bold; }
-    
-    /* Kolorowe przyciski dla łatwiejszej obsługi */
-    button[kind="primary"] { background-color: #ff4b4b !important; border: none !important; }
-    button[kind="secondary"] { background-color: #3e4451 !important; color: white !important; }
+    .shopping-card { background-color: #1c1f26; padding: 15px; border-radius: 10px; border-left: 5px solid #00ff88; margin-bottom: 10px; color: white !important; font-weight: bold; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- ZARZĄDZANIE PLIKAMI ---
-FILES = {"data": "budzet_pro_data.json", "shopping": "zakupy_data.json", "raty": "raty_data.json", "sejf": "sejf_total.json"}
+# --- ZARZĄDZANIE DANYMI (Niezawodne ID) ---
+FILES = {"data": "budzet_total.json", "shopping": "zakupy_total.json", "raty": "raty_total.json", "sejf": "sejf_total.json"}
 
-def load_data(key, cols):
+def load_data(key):
     if os.path.exists(FILES[key]):
-        try:
-            with open(FILES[key], "r", encoding='utf-8') as f:
-                d = json.load(f)
-                return pd.DataFrame(d) if d else pd.DataFrame(columns=cols)
-        except: return pd.DataFrame(columns=cols)
-    return pd.DataFrame(columns=cols)
+        with open(FILES[key], "r", encoding='utf-8') as f:
+            return json.load(f)
+    return []
 
-def save_data(df, key):
+def save_data(data, key):
     with open(FILES[key], "w", encoding='utf-8') as f:
-        json.dump(df.to_dict(orient="records"), f, indent=4, ensure_ascii=False)
+        json.dump(data, f, indent=4, ensure_ascii=False)
 
 # Inicjalizacja
-df_all = load_data("data", ["Data", "Czas", "Osoba", "Typ", "Kwota", "Opis", "Miesiac_Ref"])
-df_raty = load_data("raty", ["Nazwa", "Kwota", "Start", "Koniec"])
-df_sejf = load_data("sejf", ["Suma"])
-if df_sejf.empty: df_sejf = pd.DataFrame([{"Suma": 0.0}])
+raw_all = load_data("data")
+raw_shop = load_data("shopping")
+raw_raty = load_data("raty")
+raw_sejf = load_data("sejf") if load_data("sejf") else [{"Suma": 0.0}]
+
+# --- IKONY ZAKUPÓW ---
+def get_icon(name):
+    icons = {"mleko": "🥛", "ser": "🧀", "masło": "🧈", "chleb": "🍞", "buł": "🥖", "jaj": "🥚", "mięs": "🥩", "szynka": "🍖", "piw": "🍺", "wod": "💧", "sok": "🥤", "kawa": "☕", "herbata": "🍵", "pomid": "🍅", "ogór": "🥒", "ziem": "🥔", "owoc": "🍎", "papie": "🧻", "myd": "🧼", "płyn": "🧴", "pasta": "🪥", "karma": "🐾", "pieluchy": "👶"}
+    for k, v in icons.items():
+        if k in name.lower(): return v
+    return "🛒"
 
 # --- NAWIGACJA ---
 with st.sidebar:
-    st.title("🏦 Menu")
-    obecny_msc = datetime.now().strftime("%Y-%m")
-    dostepne_miesiace = sorted(list(set(df_all['Miesiac_Ref'].unique().tolist() + [obecny_msc])), reverse=True)
-    wybrany_msc = st.selectbox("📅 Miesiąc:", dostepne_miesiace)
-    page = st.radio("Idź do:", ["🏠 Pulpit", "💳 Raty", "🛒 Zakupy", "💰 Skarbonki"])
+    st.title("🏦 Budżet Pro")
+    curr_msc = datetime.now().strftime("%Y-%m")
+    all_months = sorted(list(set([x['Miesiac_Ref'] for x in raw_all] + [curr_msc])), reverse=True)
+    sel_msc = st.selectbox("📅 Wybierz miesiąc", all_months)
+    page = st.radio("Menu", ["🏠 Pulpit", "💳 Raty i Stałe", "🛒 Lista Zakupów", "💰 Skarbonki"])
 
-# --- LOGIKA ---
-df_current = df_all[df_all['Miesiac_Ref'] == wybrany_msc].copy()
+# --- LOGIKA OBLICZEŃ ---
+msc_data = [x for x in raw_all if x['Miesiac_Ref'] == sel_msc]
+target_dt = datetime.strptime(sel_msc, "%Y-%m").date()
+
+# 800+
+dzieci = [date(2018, 8, 1), date(2022, 11, 1)]
+auto_800 = sum(800 for d in dzieci if target_dt < d + relativedelta(years=18))
+
+# Raty
+raty_msc = 0
+for r in raw_raty:
+    try:
+        s = datetime.strptime(r['Start'], '%Y-%m-%d').date()
+        k = datetime.strptime(r['Koniec'], '%Y-%m-%d').date()
+        if s.replace(day=1) <= target_dt <= k.replace(day=1):
+            raty_msc += r['Kwota']
+    except: continue
+
+# Sumy
+total_in = sum(x['Kwota'] for x in msc_data if x['Typ'] == "Przychod") + auto_800
+total_out = sum(x['Kwota'] for x in msc_data if x['Typ'] != "Przychod") + raty_msc
+wolne = total_in - total_out
+
+# Limit dzienny
+days_in_m = calendar.monthrange(target_dt.year, target_dt.month)[1]
+days_left = (days_in_m - datetime.now().day + 1) if sel_msc == curr_msc else 1
+limit_dzienny = wolne / max(days_left, 1)
 
 # --- STRONA 1: PULPIT ---
 if page == "🏠 Pulpit":
-    col_add, col_hist = st.columns([1, 1.5])
-    
+    c1, c2 = st.columns(2)
+    c1.metric("Limit na dziś", f"{max(0, limit_dzienny):,.2f} zł")
+    c2.metric("Oszczędności Razem", f"{raw_sejf[0]['Suma'] + sum(x['Kwota'] for x in raw_all if x['Typ'] == 'Fundusze Celowe'):,.2f} zł")
+
+    st.divider()
+    col_add, col_list = st.columns([1, 1.5])
+
     with col_add:
-        st.markdown("<div style='background-color:#00ff88; color:black;' class='section-header'>➕ Dodaj Wpis</div>", unsafe_allow_html=True)
-        with st.form("new_entry_form", clear_on_submit=True):
+        st.subheader("➕ Dodaj Wpis")
+        with st.form("add_form", clear_on_submit=True):
             t = st.selectbox("Typ", ["Wydatki Zmienne", "Stałe Opłaty", "Przychod", "Fundusze Celowe"])
-            o = st.selectbox("Osoba", ["Piotr", "Natalia"])
+            o = st.selectbox("Kto", ["Piotr", "Natalia"])
             kw = st.number_input("Kwota", min_value=0.0)
-            op = st.text_input("Opis (co to?)")
-            if st.form_submit_button("DODAJ"):
-                now = datetime.now()
-                new_row = {"Data": str(now.date()), "Czas": now.strftime("%H:%M"), "Osoba": o, "Typ": t, "Kwota": kw, "Opis": op, "Miesiac_Ref": wybrany_msc}
-                df_all = pd.concat([df_all, pd.DataFrame([new_row])], ignore_index=True)
-                save_data(df_all, "data")
-                st.rerun()
+            op = st.text_input("Opis")
+            if st.form_submit_button("ZAPISZ"):
+                raw_all.append({"Id": str(datetime.now().timestamp()), "Data": str(date.today()), "Osoba": o, "Typ": t, "Kwota": kw, "Opis": op, "Miesiac_Ref": sel_msc})
+                save_data(raw_all, "data"); st.rerun()
 
-    with col_hist:
-        # PRZYCHODY (Wpływy)
-        st.markdown("<div style='background-color:#00d4ff; color:black;' class='section-header'>💰 Wpływy</div>", unsafe_allow_html=True)
-        inc_df = df_current[df_current['Typ'] == "Przychod"]
-        for i, row in inc_df.sort_index(ascending=False).iterrows():
-            with st.expander(f"➕ {row['Kwota']} zł | {row['Opis']}"):
-                c1, c2 = st.columns(2)
-                # USUWANIE
-                if c1.button("🗑️ USUŃ", key=f"del_inc_{i}", type="primary", use_container_width=True):
-                    df_all = df_all.drop(index=i)
-                    save_data(df_all, "data")
-                    st.rerun()
-                # EDYCJA
-                if c2.button("✏️ EDYTUJ", key=f"ed_inc_{i}", use_container_width=True):
-                    st.session_state[f"edit_mode_{i}"] = True
-                
-                if st.session_state.get(f"edit_mode_{i}"):
-                    new_kw = st.number_input("Nowa kwota", value=float(row['Kwota']), key=f"nk_{i}")
-                    new_op = st.text_input("Nowy opis", value=row['Opis'], key=f"no_{i}")
-                    if st.button("ZAPISZ ZMIANY", key=f"save_{i}"):
-                        df_all.at[i, 'Kwota'] = new_kw
-                        df_all.at[i, 'Opis'] = new_op
-                        save_data(df_all, "data")
-                        del st.session_state[f"edit_mode_{i}"]
-                        st.rerun()
+    with col_list:
+        # SEKCA WPŁYWÓW
+        st.markdown(f"<div class='header-wplywy'>💰 WPŁYWY: {total_in:,.2f} zł</div>", unsafe_allow_html=True)
+        if auto_800 > 0: st.info(f"✨ Automatyczne 800+: {auto_800} zł")
+        for x in raw_all[::-1]:
+            if x['Miesiac_Ref'] == sel_msc and x['Typ'] == "Przychod":
+                with st.expander(f"➕ {x['Kwota']} zł | {x['Opis']}"):
+                    c1, c2 = st.columns(2)
+                    if c1.button("🗑️ Usuń", key=f"del_{x['Id']}"):
+                        raw_all = [i for i in raw_all if i['Id'] != x['Id']]
+                        save_data(raw_all, "data"); st.rerun()
+                    if c2.button("✏️ Edytuj", key=f"ed_{x['Id']}"):
+                        st.session_state[f"mode_{x['Id']}"] = True
+                    if st.session_state.get(f"mode_{x['Id']}"):
+                        new_k = st.number_input("Kwota", value=float(x['Kwota']), key=f"k_{x['Id']}")
+                        new_o = st.text_input("Opis", value=x['Opis'], key=f"o_{x['Id']}")
+                        if st.button("Zapisz", key=f"s_{x['Id']}"):
+                            for item in raw_all:
+                                if item['Id'] == x['Id']: item['Kwota'], item['Opis'] = new_k, new_o
+                            save_data(raw_all, "data"); del st.session_state[f"mode_{x['Id']}"]; st.rerun()
 
-        # WYDATKI
-        st.markdown("<div style='background-color:#ff4b4b; color:white;' class='section-header'>💸 Wydatki</div>", unsafe_allow_html=True)
-        exp_df = df_current[df_current['Typ'] != "Przychod"]
-        for i, row in exp_df.sort_index(ascending=False).iterrows():
-            with st.expander(f"➖ {row['Kwota']} zł | {row['Opis']} ({row['Typ']})"):
-                c1, c2 = st.columns(2)
-                # USUWANIE (Naprawione - teraz na pewno usunie z bazy głównej)
-                if c1.button("🗑️ USUŃ", key=f"del_exp_{i}", type="primary", use_container_width=True):
-                    df_all = df_all.drop(index=i)
-                    save_data(df_all, "data")
-                    st.rerun()
-                # EDYCJA
-                if c2.button("✏️ EDYTUJ", key=f"ed_exp_{i}", use_container_width=True):
-                    st.session_state[f"edit_mode_{i}"] = True
+        # SEKCJA WYDATKÓW
+        st.markdown(f"<div class='header-wydatki'>💸 WYDATKI: {total_out:,.2f} zł</div>", unsafe_allow_html=True)
+        if raty_msc > 0: st.warning(f"💳 Raty: {raty_msc} zł")
+        for x in raw_all[::-1]:
+            if x['Miesiac_Ref'] == sel_msc and x['Typ'] != "Przychod":
+                with st.expander(f"➖ {x['Kwota']} zł | {x['Opis']} ({x['Typ']})"):
+                    c1, c2 = st.columns(2)
+                    if c1.button("🗑️ Usuń", key=f"del_{x['Id']}"):
+                        raw_all = [i for i in raw_all if i['Id'] != x['Id']]
+                        save_data(raw_all, "data"); st.rerun()
+                    if c2.button("✏️ Edytuj", key=f"ed_{x['Id']}"):
+                        st.session_state[f"mode_{x['Id']}"] = True
+                    if st.session_state.get(f"mode_{x['Id']}"):
+                        new_k = st.number_input("Kwota", value=float(x['Kwota']), key=f"k_{x['Id']}")
+                        new_o = st.text_input("Opis", value=x['Opis'], key=f"o_{x['Id']}")
+                        if st.button("Zapisz", key=f"s_{x['Id']}"):
+                            for item in raw_all:
+                                if item['Id'] == x['Id']: item['Kwota'], item['Opis'] = new_k, new_o
+                            save_data(raw_all, "data"); del st.session_state[f"mode_{x['Id']}"]; st.rerun()
 
-                if st.session_state.get(f"edit_mode_{i}"):
-                    new_kw = st.number_input("Nowa kwota", value=float(row['Kwota']), key=f"nk_{i}")
-                    new_op = st.text_input("Nowy opis", value=row['Opis'], key=f"no_{i}")
-                    if st.button("ZAPISZ ZMIANY", key=f"save_{i}"):
-                        df_all.at[i, 'Kwota'] = new_kw
-                        df_all.at[i, 'Opis'] = new_op
-                        save_data(df_all, "data")
-                        del st.session_state[f"edit_mode_{i}"]
-                        st.rerun()
+# --- STRONA 2: RATY ---
+elif page == "💳 Raty i Stałe":
+    st.subheader("💳 Harmonogram Rat")
+    with st.form("rata_f"):
+        n, k = st.text_input("Nazwa raty"), st.number_input("Kwota miesięczna")
+        s, e = st.date_input("Start"), st.date_input("Koniec")
+        if st.form_submit_button("DODAJ RATĘ"):
+            raw_raty.append({"Id": str(datetime.now().timestamp()), "Nazwa": n, "Kwota": k, "Start": str(s), "Koniec": str(e)})
+            save_data(raw_raty, "raty"); st.rerun()
+    for r in raw_raty:
+        st.info(f"📌 **{r['Nazwa']}**: {r['Kwota']} zł (do {r['Koniec']})")
+        if st.button("Usuń", key=f"dr_{r['Id']}"):
+            raw_raty = [i for i in raw_raty if i['Id'] != r['Id']]
+            save_data(raw_raty, "raty"); st.rerun()
 
-# --- POZOSTAŁE STRONY (UPROSZCZONE DLA CZYTELNOŚCI) ---
-elif page == "🛒 Zakupy":
-    st.header("🛒 Lista Zakupów")
-    # Kod listy zakupów jak poprzednio...
-    # (Pamiętaj o dodaniu st.rerun() po usunięciu produktu!)
+# --- STRONA 3: ZAKUPY ---
+elif page == "🛒 Lista Zakupów":
+    st.subheader("🛒 Zakupy")
+    new_p = st.text_input("Co kupić?")
+    if st.button("Dodaj ➕"):
+        raw_shop.append({"Id": str(datetime.now().timestamp()), "Item": f"{get_icon(new_p)} {new_p}", "Time": datetime.now().strftime("%H:%M")})
+        save_data(raw_shop, "shopping"); st.rerun()
+    for p in raw_shop:
+        c1, c2 = st.columns([5,1])
+        c1.markdown(f"<div class='shopping-card'>{p['Item']} <br><small>Dodano: {p['Time']}</small></div>", unsafe_allow_html=True)
+        if c2.button("✅", key=p['Id']):
+            raw_shop = [i for i in raw_shop if i['Id'] != p['Id']]
+            save_data(raw_shop, "shopping"); st.rerun()
 
-elif page == "💳 Raty":
-    st.header("💳 Raty")
-    # Kod rat jak poprzednio...
-
+# --- STRONA 4: SKARBONKI ---
 elif page == "💰 Skarbonki":
-    st.header("💰 Skarbonki")
-    # Kod skarbonek jak poprzednio...
+    st.subheader("💰 Twój Sejf i Cele")
+    nowy_sejf = st.number_input("Sejf Globalny (gotówka/konto)", value=float(raw_sejf[0]['Suma']))
+    if st.button("Aktualizuj Sejf"):
+        raw_sejf[0]['Suma'] = nowy_sejf
+        save_data(raw_sejf, "sejf"); st.rerun()
+    
+    st.divider()
+    cele = {}
+    for x in raw_all:
+        if x['Typ'] == "Fundusze Celowe":
+            cele[x['Opis']] = cele.get(x['Opis'], 0) + x['Kwota']
+    for n, k in cele.items():
+        st.success(f"📂 {n}: **{k:,.2f} zł**")
