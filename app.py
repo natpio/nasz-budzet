@@ -3,201 +3,194 @@ import pandas as pd
 import json
 import os
 from datetime import datetime, date
-from dateutil.relativedelta import relativedelta
 import calendar
+from dateutil.relativedelta import relativedelta
+import plotly.express as px
 
-# --- KONFIGURACJA STRONY ---
-st.set_page_config(page_title="Budżet Pro - Pełna Kontrola", page_icon="🏦", layout="wide")
-
-# --- STYLIZACJA (WYSOKI KONTRAST) ---
+# --- KONFIGURACJA I STYLE ---
+st.set_page_config(page_title="Budżet Rodzinny 2.0", layout="wide")
 st.markdown("""
     <style>
-    .main { background-color: #0e1117; color: #ffffff; }
-    .stMetric { background-color: #1c1f26; padding: 15px; border-radius: 12px; border: 1px solid #444; }
-    .header-wplywy { background-color: #00d4ff; color: black; padding: 12px; border-radius: 8px; font-weight: bold; text-transform: uppercase; margin-top: 10px; }
-    .header-wydatki { background-color: #ff4b4b; color: white; padding: 12px; border-radius: 8px; font-weight: bold; text-transform: uppercase; margin-top: 10px; }
-    .stExpander { border: 1px solid #555 !important; background-color: #1c1f26 !important; margin-bottom: 8px !important; }
-    div[data-testid="stExpander"] p { color: white !important; font-size: 1.1em; font-weight: bold; }
-    .shopping-card { background-color: #1c1f26; padding: 15px; border-radius: 10px; border-left: 5px solid #00ff88; margin-bottom: 10px; color: white !important; font-weight: bold; }
-    .minus-alert { background-color: #3e0b0b; border: 2px solid #ff4b4b; padding: 15px; border-radius: 10px; color: white; text-align: center; font-weight: bold; margin-bottom: 20px; }
+    .main { background-color: #0e1117; color: white; }
+    .stMetric { background-color: #1c1f26; padding: 15px; border-radius: 10px; border: 1px solid #333; }
+    .header-box { background-color: #262730; padding: 20px; border-radius: 10px; margin-bottom: 20px; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- ZARZĄDZANIE DANYMI ---
+# --- SYSTEM PLIKÓW ---
 FILES = {
-    "data": "budzet_dynamiczny.json", 
-    "shopping": "zakupy_total.json", 
-    "raty": "raty_total.json", 
-    "sejf": "sejf_total.json", 
-    "config": "budzet_config.json"
+    "transakcje": "db_transakcje.json",
+    "stale": "db_stale.json",
+    "raty": "db_raty.json",
+    "kasa": "db_kasa.json"
 }
 
-def load_data(key):
+def load_db(key, default):
     if os.path.exists(FILES[key]):
-        with open(FILES[key], "r", encoding='utf-8') as f:
-            return json.load(f)
-    if key == "config": return {"current_period": datetime.now().strftime("%Y-%m-%d")}
-    return []
+        with open(FILES[key], "r", encoding='utf-8') as f: return json.load(f)
+    return default
 
-def save_data(data, key):
-    with open(FILES[key], "w", encoding='utf-8') as f:
-        json.dump(data, f, indent=4, ensure_ascii=False)
+def save_db(key, data):
+    with open(FILES[key], "w", encoding='utf-8') as f: json.dump(data, f, indent=4)
 
-# Inicjalizacja baz danych
-raw_all = load_data("data")
-raw_shop = load_data("shopping")
-raw_raty = load_data("raty")
-raw_sejf = load_data("sejf") if load_data("sejf") else [{"Suma": 0.0}]
-config = load_data("config")
+# Inicjalizacja danych
+transakcje = load_db("transakcje", []) # (Punkty 1, 2, 5)
+oplaty_stale = load_db("stale", [])     # (Punkt 3)
+raty = load_db("raty", [])             # (Punkt 4)
+kasa_oszcz = load_db("kasa", {"nadwyzki": 0.0}) # (Punkty 6, 7)
 
-# --- IKONY ZAKUPÓW ---
-def get_icon(name):
-    icons = {"mleko": "🥛", "ser": "🧀", "masło": "🧈", "chleb": "🍞", "buł": "🥖", "jaj": "🥚", "mięs": "🥩", "szynka": "🍖", "piw": "🍺", "wod": "💧", "sok": "🥤", "kawa": "☕", "herbata": "🍵", "pomid": "🍅", "ogór": "🥒", "ziem": "🥔", "owoc": "🍎", "papie": "🧻", "myd": "🧼", "pasta": "🪥", "karma": "🐾", "pieluchy": "👶"}
-    for k, v in icons.items():
-        if k in name.lower(): return v
-    return "🛒"
+# --- LOGIKA 800+ (Punkt 11) ---
+def oblicz_800plus(data_widoku):
+    laura = date(2018, 8, 1)
+    zosia = date(2022, 11, 1)
+    suma = 0
+    if data_widoku < laura + relativedelta(years=18): suma += 800
+    if data_widoku < zosia + relativedelta(years=18): suma += 800
+    return suma
 
-# --- NAWIGACJA ---
+# --- NAWIGACJA (Sidebar) ---
 with st.sidebar:
-    st.title("🏦 Budżet Piotr & Natalia")
-    all_periods = sorted(list(set([x['Okres_Ref'] for x in raw_all] + [config['current_period']])), reverse=True)
-    sel_period = st.selectbox("📅 Okres budżetowy (od wypłaty)", all_periods)
-    page = st.radio("Menu", ["🏠 Pulpit", "💳 Raty i Stałe", "🛒 Lista Zakupów", "💰 Skarbonki", "⚙️ Zamknij Okres"])
-    st.divider()
-    st.info(f"Obecnie zarządzasz budżetem od: {sel_period}")
+    st.title("🏦 Panel Sterowania")
+    wybrany_miesiac = st.selectbox("Miesiąc", 
+        pd.date_range(start="2024-01-01", periods=36, freq='MS').strftime("%Y-%m").tolist(),
+        index=pd.date_range(start="2024-01-01", periods=36, freq='MS').strftime("%Y-%m").tolist().index(datetime.now().strftime("%Y-%m"))
+    )
+    menu = st.radio("Nawigacja", ["🏠 Pulpit", "⚙️ Wydatki Stałe i Raty", "📊 Statystyki (Rok)"])
 
-# --- LOGIKA OBLICZEŃ ---
-msc_data = [x for x in raw_all if x['Okres_Ref'] == sel_period]
-period_start_dt = datetime.strptime(sel_period, "%Y-%m-%d").date()
+sel_dt = datetime.strptime(wybrany_miesiac, "%Y-%m").date()
 
-# Automatyczne 800+ i Raty
-auto_800 = sum(800 for d in [date(2018, 8, 1), date(2022, 11, 1)] if period_start_dt < d + relativedelta(years=18))
-raty_val = sum(r['Kwota'] for r in raw_raty if datetime.strptime(r['Start'], '%Y-%m-%d').date() <= period_start_dt <= datetime.strptime(r['Koniec'], '%Y-%m-%d').date())
+# --- PRZELICZENIA MIESIĘCZNE ---
+# Dochody (Punkt 1 + 11)
+msc_dochody = sum(t['kwota'] for t in transakcje if t['miesiac'] == wybrany_miesiac and t['typ'] == "Wynagrodzenie")
+suma_800 = oblicz_800plus(sel_dt)
+total_dochody = msc_dochody + suma_800
 
-total_in = sum(x['Kwota'] for x in msc_data if x['Typ'] == "Przychod") + auto_800
-total_out = sum(x['Kwota'] for x in msc_data if x['Typ'] != "Przychod") + raty_val
-wolne = total_in - total_out
+# Wydatki Zmienne (Punkt 2)
+msc_zmienne = sum(t['kwota'] for t in transakcje if t['miesiac'] == wybrany_miesiac and t['typ'] == "Wydatek Zmienny")
+
+# Wydatki Stałe i Raty (Punkty 3 + 4)
+msc_stale = sum(s['kwota'] for s in oplaty_stale)
+msc_raty = sum(r['kwota'] for r in raty if datetime.strptime(r['start'], "%Y-%m-%d").date() <= sel_dt <= datetime.strptime(r['koniec'], "%Y-%m-%d").date())
+
+# Oszczędności Celowe (Punkt 5)
+msc_oszcz_celowe = sum(t['kwota'] for t in transakcje if t['miesiac'] == wybrany_miesiac and t['typ'] == "Oszczędność Celowa")
+
+# Bilans (Punkt 8 + 9)
+suma_wydatkow = msc_zmienne + msc_stale + msc_raty + msc_oszcz_celowe
+dostepne_środki = total_dochody - suma_wydatkow
+
+# Kasa Oszczędnościowa (Punkt 6)
+wszystkie_oszcz_celowe = sum(t['kwota'] for t in transakcje if t['typ'] == "Oszczędność Celowa")
+aktualna_kasa = kasa_oszcz['nadwyzki'] + wszystkie_oszcz_celowe
 
 # --- STRONA 1: PULPIT ---
-if page == "🏠 Pulpit":
-    if wolne < 0:
-        st.markdown(f"<div class='minus-alert'>🚨 UWAGA: Brakuje {abs(wolne):,.2f} zł do zamknięcia budżetu!</div>", unsafe_allow_html=True)
+if menu == "🏠 Pulpit":
+    # Wskaźniki górne
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Portfel (Miesiąc)", f"{dostepne_środki:,.2f} zł")
+    c2.metric("Kasa Oszczędnościowa", f"{aktualna_kasa:,.2f} zł") # (Punkt 6)
     
-    c1, c2 = st.columns(2)
-    with c1: st.metric("Saldo do wypłaty", f"{wolne:,.2f} zł", delta=f"In: {total_in:,.0f} | Out: {total_out:,.0f}")
-    with c2: st.metric("Sejf (Nienaruszalny)", f"{raw_sejf[0]['Suma']:,.2f} zł")
+    # Punkt 8: Ile dziennie
+    dni_w_msc = calendar.monthrange(sel_dt.year, sel_dt.month)[1]
+    dzis = datetime.now()
+    pozostalo_dni = (dni_w_msc - dzis.day + 1) if dzis.strftime("%Y-%m") == wybrany_miesiac else dni_w_msc
+    dzienny_limit = dostepne_środki / max(1, pozostalo_dni)
+    c3.metric("Limit dzienny", f"{max(0, dzienny_limit):,.2f} zł")
 
+    # Punkt 9: Życie pod kreską
+    if dostepne_środki < 0:
+        st.error(f"⚠️ Brakuje Ci {abs(dostepne_środki):,.2f} zł do końca miesiąca!")
+        if st.button("🆘 Pobierz brakującą kwotę z Kasy Oszczędnościowej"):
+            kasa_oszcz['nadwyzki'] -= abs(dostepne_środki)
+            transakcje.append({"id": str(datetime.now().timestamp()), "miesiac": wybrany_miesiac, "typ": "Wynagrodzenie", "kwota": abs(dostepne_środki), "opis": "Ratunek z Kasy"})
+            save_db("kasa", kasa_oszcz); save_db("transakcje", transakcje); st.rerun()
+
+    # Formularze dodawania (Punkty 1, 2, 5)
     st.divider()
-    col_add, col_list = st.columns([1, 1.5])
-
-    with col_add:
-        st.markdown("<div class='header-wplywy' style='background-color:#00ff88'>➕ DODAJ WPIS</div>", unsafe_allow_html=True)
-        with st.form("entry_form", clear_on_submit=True):
-            t = st.selectbox("Typ", ["Wydatki Zmienne", "Stałe Opłaty", "Przychod", "Fundusze Celowe"])
-            o = st.selectbox("Kto", ["Piotr", "Natalia"])
-            kw = st.number_input("Kwota", min_value=0.0)
-            op = st.text_input("Opis")
-            if st.form_submit_button("ZAPISZ DO HISTORII"):
-                raw_all.append({"Id": str(datetime.now().timestamp()), "Data": str(date.today()), "Osoba": o, "Typ": t, "Kwota": kw, "Opis": op, "Okres_Ref": sel_period})
-                save_data(raw_all, "data"); st.rerun()
-
-    with col_list:
-        # WPŁYWY
-        st.markdown(f"<div class='header-wplywy'>💰 WPŁYWY</div>", unsafe_allow_html=True)
-        if auto_800 > 0: st.info(f"✨ Automatyczne 800+: {auto_800} zł")
-        for x in raw_all[::-1]:
-            if x['Okres_Ref'] == sel_period and x['Typ'] == "Przychod":
-                with st.expander(f"➕ {x['Kwota']} zł | {x['Opis']}"):
-                    c1, c2 = st.columns(2)
-                    if c1.button("🗑️ Usuń", key=f"del_{x['Id']}"):
-                        raw_all = [i for i in raw_all if i['Id'] != x['Id']]; save_data(raw_all, "data"); st.rerun()
-                    if c2.button("✏️ Edytuj", key=f"ed_{x['Id']}"): st.session_state[f"mode_{x['Id']}"] = True
-                    if st.session_state.get(f"mode_{x['Id']}"):
-                        new_k = st.number_input("Kwota", value=float(x['Kwota']), key=f"k_{x['Id']}")
-                        new_o = st.text_input("Opis", value=x['Opis'], key=f"o_{x['Id']}")
-                        if st.button("Zapisz", key=f"s_{x['Id']}"):
-                            for i in raw_all:
-                                if i['Id'] == x['Id']: i['Kwota'], i['Opis'] = new_k, new_o
-                            save_data(raw_all, "data"); del st.session_state[f"mode_{x['Id']}"]; st.rerun()
-
-        # WYDATKI
-        st.markdown(f"<div class='header-wydatki'>💸 WYDATKI</div>", unsafe_allow_html=True)
-        if raty_val > 0: st.warning(f"💳 Aktywne raty: {raty_val} zł")
-        for x in raw_all[::-1]:
-            if x['Okres_Ref'] == sel_period and x['Typ'] != "Przychod":
-                with st.expander(f"➖ {x['Kwota']} zł | {x['Opis']} ({x['Typ']})"):
-                    c1, c2 = st.columns(2)
-                    if c1.button("🗑️ Usuń", key=f"del_{x['Id']}"):
-                        raw_all = [i for i in raw_all if i['Id'] != x['Id']]; save_data(raw_all, "data"); st.rerun()
-                    if c2.button("✏️ Edytuj", key=f"ed_{x['Id']}"): st.session_state[f"mode_{x['Id']}"] = True
-                    if st.session_state.get(f"mode_{x['Id']}"):
-                        new_k = st.number_input("Kwota", value=float(x['Kwota']), key=f"k_{x['Id']}")
-                        new_o = st.text_input("Opis", value=x['Opis'], key=f"o_{x['Id']}")
-                        if st.button("Zapisz", key=f"s_{x['Id']}"):
-                            for i in raw_all:
-                                if i['Id'] == x['Id']: i['Kwota'], i['Opis'] = new_k, new_o
-                            save_data(raw_all, "data"); del st.session_state[f"mode_{x['Id']}"]; st.rerun()
-
-# --- STRONA 2: RATY ---
-elif page == "💳 Raty i Stałe":
-    st.header("💳 Twoje Raty")
-    with st.form("rata_f"):
-        n, k = st.text_input("Nazwa zobowiązania"), st.number_input("Kwota miesięczna", min_value=0.0)
-        s, e = st.date_input("Kiedy startuje?"), st.date_input("Kiedy koniec?")
-        if st.form_submit_button("DODAJ RATĘ"):
-            raw_raty.append({"Id": str(datetime.now().timestamp()), "Nazwa": n, "Kwota": k, "Start": str(s), "Koniec": str(e)})
-            save_data(raw_raty, "raty"); st.rerun()
-    st.divider()
-    for r in raw_raty:
-        with st.container():
-            st.info(f"📌 **{r['Nazwa']}**: {r['Kwota']} zł (od {r['Start']} do {r['Koniec']})")
-            if st.button("Usuń tę ratę", key=f"dr_{r['Id']}"):
-                raw_raty = [i for i in raw_raty if i['Id'] != r['Id']]; save_data(raw_raty, "raty"); st.rerun()
-
-# --- STRONA 3: ZAKUPY ---
-elif page == "🛒 Lista Zakupów":
-    st.header("🛒 Co kupić?")
-    new_p = st.text_input("Dodaj produkt na listę...")
-    if st.button("Dopisz ➕"):
-        if new_p:
-            raw_shop.append({"Id": str(datetime.now().timestamp()), "Item": f"{get_icon(new_p)} {new_p}", "Time": datetime.now().strftime("%H:%M")})
-            save_data(raw_shop, "shopping"); st.rerun()
-    st.divider()
-    for p in raw_shop:
-        c1, c2 = st.columns([5,1])
-        c1.markdown(f"<div class='shopping-card'>{p['Item']} <br><small>Dodano: {p['Time']}</small></div>", unsafe_allow_html=True)
-        if c2.button("✅", key=p['Id']):
-            raw_shop = [i for i in raw_shop if i['Id'] != p['Id']]; save_data(raw_shop, "shopping"); st.rerun()
-
-# --- STRONA 4: SKARBONKI ---
-elif page == "💰 Skarbonki":
-    st.header("💰 Sejf i Oszczędności")
-    st.markdown("### Stan Sejfu Globalnego")
-    nowy_sejf = st.number_input("Wpisz stan oszczędności (ręcznie)", value=float(raw_sejf[0]['Suma']))
-    if st.button("Zaktualizuj Sejf"):
-        raw_sejf[0]['Suma'] = nowy_sejf; save_data(raw_sejf, "sejf"); st.success("Sejf zaktualizowany!"); st.rerun()
+    col1, col2 = st.columns(2)
+    with col1:
+        st.subheader("📝 Nowy wpis")
+        with st.form("trans_form", clear_on_submit=True):
+            t_typ = st.selectbox("Typ", ["Wynagrodzenie", "Wydatek Zmienny", "Oszczędność Celowa"])
+            t_kwota = st.number_input("Kwota", min_value=0.0)
+            t_opis = st.text_input("Opis")
+            if st.form_submit_button("Dodaj"):
+                transakcje.append({"id": str(datetime.now().timestamp()), "miesiac": wybrany_miesiac, "typ": t_typ, "kwota": t_kwota, "opis": t_opis})
+                save_db("transakcje", transakcje); st.rerun()
     
-    st.divider()
-    st.markdown("### Fundusze Celowe")
-    cele = {}
-    for x in raw_all:
-        if x['Typ'] == "Fundusze Celowe":
-            cele[x['Opis']] = cele.get(x['Opis'], 0) + x['Kwota']
-    if cele:
-        for n, k in cele.items(): st.success(f"📂 {n}: **{k:,.2f} zł**")
-    else: st.write("Brak funduszy celowych w historii.")
+    with col2:
+        st.subheader("🏁 Zamknięcie miesiąca") # (Punkt 7)
+        if st.button("Zamknij miesiąc i przesuń nadwyżkę do Kasy"):
+            if dostepne_środki > 0:
+                kasa_oszcz['nadwyzki'] += dostepne_środki
+                transakcje.append({"id": str(datetime.now().timestamp()), "miesiac": wybrany_miesiac, "typ": "Wydatek Zmienny", "kwota": dostepne_środki, "opis": "Zamknięcie miesiąca (przesunięcie)"})
+                save_db("kasa", kasa_oszcz); save_db("transakcje", transakcje); st.success("Pieniądze przelane do kasy!"); st.rerun()
 
-# --- STRONA 5: ZAMKNIJ OKRES ---
-elif page == "⚙️ Zamknij Okres":
-    st.header("🏁 Zamknięcie okresu wypłatowego")
-    st.write(f"Zamykasz okres rozpoczęty: **{config['current_period']}**")
-    st.write(f"Saldo końcowe: **{wolne:,.2f} zł**")
+    # Tabela edycji (Punkty 1, 2, 5 - edycja i usuwanie)
+    st.subheader("📋 Historia okresu")
+    for i, t in enumerate([x for x in transakcje if x['miesiac'] == wybrany_miesiac]):
+        with st.expander(f"{t['typ']} | {t['kwota']} zł | {t['opis']}"):
+            new_kwota = st.number_input("Kwota", value=float(t['kwota']), key=f"k_{t['id']}")
+            new_opis = st.text_input("Opis", value=t['opis'], key=f"o_{t['id']}")
+            c_e1, c_e2 = st.columns(2)
+            if c_e1.button("Zapisz zmiany", key=f"s_{t['id']}"):
+                t['kwota'], t['opis'] = new_kwota, new_opis
+                save_db("transakcje", transakcje); st.rerun()
+            if c_e2.button("Usuń", key=f"d_{t['id']}"):
+                transakcje = [x for x in transakcje if x['id'] != t['id']]
+                save_db("transakcje", transakcje); st.rerun()
+
+# --- STRONA 2: STAŁE I RATY (Punkty 3 + 4) ---
+elif menu == "⚙️ Wydatki Stałe i Raty":
+    st.header("⚙️ Zarządzanie stałymi elementami")
+    c_s1, c_s2 = st.columns(2)
     
-    st.warning("Pamiętaj: Zamknięcie okresu tylko czyści historię na Pulpicie. Sejf NIE zostanie naruszony bez Twojej zgody.")
-    
-    if st.button("ZAMKNIJ I ZACZNIJ NOWĄ WYPŁATĘ"):
-        new_start = str(date.today())
-        config['current_period'] = new_start
-        save_data(config, "config")
-        st.success(f"Okres zamknięty! Nowy startuje z datą {new_start}")
-        st.rerun()
+    with c_s1:
+        st.subheader("🏠 Wydatki Stałe")
+        with st.form("stale_f"):
+            s_n = st.text_input("Nazwa")
+            s_k = st.number_input("Kwota", min_value=0.0)
+            if st.form_submit_button("Dodaj stały"):
+                oplaty_stale.append({"id": str(datetime.now().timestamp()), "nazwa": s_n, "kwota": s_k})
+                save_db("stale", oplaty_stale); st.rerun()
+        for s in oplaty_stale:
+            st.write(f"📌 {s['nazwa']}: {s['kwota']} zł")
+            if st.button("Usuń", key=f"ds_{s['id']}"):
+                oplaty_stale = [x for x in oplaty_stale if x['id'] != s['id']]
+                save_db("stale", oplaty_stale); st.rerun()
+
+    with c_s2:
+        st.subheader("💳 Raty")
+        with st.form("raty_f"):
+            r_n = st.text_input("Nazwa")
+            r_k = st.number_input("Rata", min_value=0.0)
+            r_s = st.date_input("Start")
+            r_e = st.date_input("Koniec")
+            if st.form_submit_button("Dodaj ratę"):
+                raty.append({"id": str(datetime.now().timestamp()), "nazwa": r_n, "kwota": r_k, "start": str(r_s), "koniec": str(r_e)})
+                save_db("raty", raty); st.rerun()
+        for r in raty:
+            st.write(f"📊 {r['nazwa']}: {r['kwota']} zł (do {r['koniec']})")
+            if st.button("Usuń", key=f"dr_{r['id']}"):
+                raty = [x for x in raty if x['id'] != r['id']]
+                save_db("raty", raty); st.rerun()
+
+# --- STRONA 3: STATYSTYKI (Punkt 10) ---
+elif menu == "📊 Statystyki (Rok)":
+    st.header("📊 Statystyki Roczne")
+    df = pd.DataFrame(transakcje)
+    if not df.empty:
+        c_r1, c_r2 = st.columns(2)
+        # Sumy roczne
+        suma_doch_rok = df[df['typ'] == "Wynagrodzenie"]['kwota'].sum() + (suma_800 * 12)
+        suma_wyd_rok = df[df['typ'] != "Wynagrodzenie"]['kwota'].sum() + (msc_stale * 12) + (msc_raty * 12)
+        c_r1.metric("Łączne Dochody (Rok)", f"{suma_doch_rok:,.2f} zł")
+        c_r2.metric("Łączne Wydatki (Rok)", f"{suma_wyd_rok:,.2f} zł")
+        
+        # Wykres typów (Punkt 10)
+        fig_pie = px.pie(df[df['typ'] != "Wynagrodzenie"], values='kwota', names='typ', title="Na co idą pieniądze?")
+        st.plotly_chart(fig_pie)
+        
+        # Wykres słupkowy miesięczny
+        fig_bar = px.bar(df, x='miesiac', y='kwota', color='typ', barmode='group', title="Przepływy miesięczne")
+        st.plotly_chart(fig_bar)
