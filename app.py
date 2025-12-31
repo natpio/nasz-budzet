@@ -7,33 +7,56 @@ import calendar
 from dateutil.relativedelta import relativedelta
 import plotly.express as px
 
-# --- KONFIGURACJA I WYRAŹNE STYLE (v3.6) ---
-st.set_page_config(page_title="Budżet Rodzinny 3.6", layout="wide")
+# --- KONFIGURACJA I TOTALNA POPRAWKA WIDOCZNOŚCI (v3.7) ---
+st.set_page_config(page_title="Budżet Rodzinny 3.7", layout="wide")
 
 st.markdown("""
     <style>
-    /* Tło główne */
+    /* Tło i ogólny tekst */
     .main { background-color: #0e1117; color: white; }
     
-    /* Naprawa czytelności Metric */
+    /* Wyraźne kafelki Metric */
     [data-testid="stMetric"] {
         background-color: #1c1f26;
         padding: 15px;
         border-radius: 10px;
         border: 1px solid #333;
     }
+    [data-testid="stMetricLabel"] > div { color: #ffffff !important; opacity: 1 !important; font-size: 1rem !important; }
+    [data-testid="stMetricValue"] > div { color: #00ff88 !important; font-weight: bold !important; }
 
-    /* Czytelne etykiety (napisy nad kwotami) */
-    [data-testid="stMetricLabel"] > div {
-        color: #ffffff !important;
-        font-size: 1rem !important;
-        opacity: 1 !important;
+    /* NAPRAWA FORMULARZY I KALENDARZA */
+    /* Wymuszenie ciemnego tła i jasnego tekstu w polach input */
+    input, select, textarea {
+        color: white !important;
+        background-color: #262730 !important;
     }
     
-    /* Jasne, wyraźne kwoty */
-    [data-testid="stMetricValue"] > div {
-        color: #00ff88 !important; /* Jasnozielony dla wartości */
+    /* Naprawa pól daty (Date Input) */
+    div[data-baseweb="input"] {
+        background-color: #262730 !important;
+        border-radius: 5px !important;
+    }
+
+    /* Poprawa widoczności etykiet w formularzach */
+    label p {
+        color: #ffffff !important;
         font-weight: bold !important;
+        font-size: 1.1rem !important;
+    }
+
+    /* Stylizacja przycisków, żeby były bardziej widoczne */
+    .stButton>button {
+        width: 100%;
+        background-color: #00ff88 !important;
+        color: #0e1117 !important;
+        font-weight: bold !important;
+        border: none !important;
+        padding: 10px !important;
+    }
+    
+    .stButton>button:hover {
+        background-color: #00cc6e !important;
     }
 
     /* Alert deficytu */
@@ -47,20 +70,11 @@ st.markdown("""
         font-weight: bold;
         color: white;
     }
-    
-    /* Poprawa widoczności tekstu w expanderach */
-    .st-ae { color: white !important; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- ZARZĄDZANIE BAZĄ DANYCH ---
-FILES = {
-    "transakcje": "db_transakcje.json",
-    "stale": "db_stale.json",
-    "raty": "db_raty.json",
-    "kasa": "db_kasa.json",
-    "zakupy": "db_zakupy.json"
-}
+# --- BAZA DANYCH ---
+FILES = {"transakcje": "db_transakcje.json", "stale": "db_stale.json", "raty": "db_raty.json", "kasa": "db_kasa.json", "zakupy": "db_zakupy.json"}
 
 def load_db(key, default):
     if os.path.exists(FILES[key]):
@@ -72,7 +86,6 @@ def load_db(key, default):
 def save_db(key, data):
     with open(FILES[key], "w", encoding='utf-8') as f: json.dump(data, f, indent=4, ensure_ascii=False)
 
-# Inicjalizacja danych
 transakcje = load_db("transakcje", [])
 oplaty_stale = load_db("stale", [])
 raty = load_db("raty", [])
@@ -87,19 +100,19 @@ def oblicz_800plus(data_widoku):
     if data_widoku < zosia + relativedelta(years=18): suma += 800
     return suma
 
-# --- NAWIGACJA SIDEBAR ---
+# --- NAWIGACJA ---
 with st.sidebar:
-    st.title("🏦 Menu Główne")
+    st.title("🏦 Budżet Domowy")
     wybrany_miesiac = st.selectbox("Wybierz Miesiąc", 
         pd.date_range(start="2024-01-01", periods=36, freq='MS').strftime("%Y-%m").tolist(),
         index=pd.date_range(start="2024-01-01", periods=36, freq='MS').strftime("%Y-%m").tolist().index(datetime.now().strftime("%Y-%m"))
     )
-    menu = st.radio("Sekcja:", ["🏠 Pulpit", "⚙️ Stałe i Raty", "🛒 Lista Zakupów", "📊 Statystyki i Kasa"])
+    menu = st.radio("Menu:", ["🏠 Pulpit", "⚙️ Stałe i Raty", "🛒 Lista Zakupów", "📊 Statystyki i Kasa"])
 
 sel_dt = datetime.strptime(wybrany_miesiac, "%Y-%m").date()
 suma_800 = oblicz_800plus(sel_dt)
 
-# --- OBLICZENIA MIESIĘCZNE ---
+# --- OBLICZENIA ---
 msc_dochody_total = sum(t['kwota'] for t in transakcje if t['miesiac'] == wybrany_miesiac and t['typ'] == "Wynagrodzenie") + suma_800
 msc_zmienne = sum(t['kwota'] for t in transakcje if t['miesiac'] == wybrany_miesiac and t['typ'] == "Wydatek Zmienny")
 msc_stale = sum(s['kwota'] for s in oplaty_stale)
@@ -134,12 +147,12 @@ if menu == "🏠 Pulpit":
         with st.form("add_f", clear_on_submit=True):
             t_typ = st.selectbox("Typ", ["Wydatek Zmienny", "Wynagrodzenie", "Oszczędność Celowa"])
             t_kw, t_op = st.number_input("Kwota", min_value=0.0), st.text_input("Opis")
-            if st.form_submit_button("Zapisz"):
+            if st.form_submit_button("Zapisz wpis"):
                 transakcje.append({"id": str(datetime.now().timestamp()), "miesiac": wybrany_miesiac, "typ": t_typ, "kwota": t_kw, "opis": t_op, "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M")})
                 save_db("transakcje", transakcje); st.rerun()
     with col_b:
-        st.subheader("🏁 Finisz")
-        if st.button("Zamknij miesiąc (Przelew do Kasy)"):
+        st.subheader("🏁 Zamknij miesiąc")
+        if st.button("Transfer nadwyżki do Kasy"):
             if dostepne_środki > 0:
                 kasa_oszcz['nadwyzki'] += dostepne_środki
                 kasa_oszcz['historia_zamkniec'].append({"data": datetime.now().strftime("%Y-%m-%d %H:%M"), "typ": "ZAMKNIĘCIE", "kwota": dostepne_środki, "opis": f"Miesiąc {wybrany_miesiac}"})
@@ -150,24 +163,20 @@ if menu == "🏠 Pulpit":
     for t in [x for x in transakcje if x['miesiac'] == wybrany_miesiac][::-1]:
         with st.expander(f"{t['typ']} | {t['kwota']} zł | {t['opis']}"):
             nk, no = st.number_input("Kwota", value=float(t['kwota']), key=f"k_{t['id']}"), st.text_input("Opis", value=t['opis'], key=f"o_{t['id']}")
-            if st.button("💾 Zapisz", key=f"s_{t['id']}"):
+            if st.button("💾 Zapisz zmiany", key=f"s_{t['id']}"):
                 t['kwota'], t['opis'] = nk, no
                 save_db("transakcje", transakcje); st.rerun()
-            if st.button("🗑️ Usuń", key=f"d_{t['id']}"):
+            if st.button("🗑️ Usuń wpis", key=f"d_{t['id']}"):
                 transakcje = [x for x in transakcje if x['id'] != t['id']]; save_db("transakcje", transakcje); st.rerun()
 
 # --- STRONA: STATYSTYKI I KASA ---
 elif menu == "📊 Statystyki i Kasa":
-    st.header("📊 Analiza Realna (bez prognoz)")
+    st.header("📊 Analiza i Sejf")
     df = pd.DataFrame(transakcje)
     
     if not df.empty:
         dzis = datetime.now()
-        # Ile miesięcy w roku faktycznie minęło
-        if sel_dt.year == dzis.year: ile_msc = dzis.month
-        elif sel_dt.year < dzis.year: ile_msc = 12
-        else: ile_msc = 0
-
+        ile_msc = dzis.month if sel_dt.year == dzis.year else (12 if sel_dt.year < dzis.year else 0)
         suma_800_rok = oblicz_800plus(sel_dt) * ile_msc
         realne_dochody = df[(df['typ'] == "Wynagrodzenie") & (~df['opis'].str.contains("Ratunek", na=False)) & (df['miesiac'].str.startswith(str(sel_dt.year)))]['kwota'].sum() + suma_800_rok
         realne_wydatki = df[(df['typ'] == "Wydatek Zmienny") & (~df['opis'].str.contains("Zamknięcie", na=False)) & (df['miesiac'].str.startswith(str(sel_dt.year)))]['kwota'].sum() + (msc_stale * ile_msc)
@@ -176,14 +185,14 @@ elif menu == "📊 Statystyki i Kasa":
         c_st1.metric(f"Dochody ({sel_dt.year})", f"{realne_dochody:,.2f} zł")
         c_st2.metric(f"Wydatki ({sel_dt.year})", f"{realne_wydatki:,.2f} zł")
         
-        fig_pie = px.pie(df[~df['opis'].str.contains("Zamknięcie", na=False) & (df['typ'] != "Wynagrodzenie")], values='kwota', names='typ', title="Struktura Wydatków")
+        fig_pie = px.pie(df[~df['opis'].str.contains("Zamknięcie", na=False) & (df['typ'] != "Wynagrodzenie")], values='kwota', names='typ', title="Twoje Wydatki")
         st.plotly_chart(fig_pie)
 
     st.subheader("🛠️ Korekta Kasy")
     with st.expander("Skoryguj stan Sejfu"):
         ck1, ck2, ck3 = st.columns([2, 2, 3])
-        k_kw, k_ak, k_po = ck1.number_input("Kwota", min_value=0.0), ck2.selectbox("Akcja", ["Odejmij", "Dodaj"]), ck3.text_input("Powód")
-        if st.button("Wykonaj korektę"):
+        k_kw, k_ak, k_po = ck1.number_input("Kwota korekty", min_value=0.0), ck2.selectbox("Akcja", ["Odejmij", "Dodaj"]), ck3.text_input("Powód")
+        if st.button("Wykonaj"):
             val = k_kw if k_ak == "Dodaj" else -k_kw
             kasa_oszcz['nadwyzki'] += val
             kasa_oszcz['historia_zamkniec'].append({"data": datetime.now().strftime("%Y-%m-%d %H:%M"), "typ": "KOREKTA", "kwota": val, "opis": k_po})
@@ -196,9 +205,9 @@ elif menu == "📊 Statystyki i Kasa":
 # --- RESZTA (Lista Zakupów, Stałe) ---
 elif menu == "🛒 Lista Zakupów":
     st.header("🛒 Lista Zakupów")
-    with st.form("sh"):
-        p = st.text_input("Produkt")
-        if st.form_submit_button("Dodaj"):
+    with st.form("sh", clear_on_submit=True):
+        p = st.text_input("Co kupić?")
+        if st.form_submit_button("Dodaj do listy"):
             lista_zakupow.append({"id": str(datetime.now().timestamp()), "nazwa": p, "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M")})
             save_db("zakupy", lista_zakupow); st.rerun()
     for p in lista_zakupow[::-1]:
@@ -208,21 +217,24 @@ elif menu == "🛒 Lista Zakupów":
             lista_zakupow = [x for x in lista_zakupow if x['id'] != p['id']]; save_db("zakupy", lista_zakupow); st.rerun()
 
 elif menu == "⚙️ Stałe i Raty":
-    st.header("⚙️ Stałe opłaty i Raty")
+    st.header("⚙️ Stałe i Raty")
     col1, col2 = st.columns(2)
     with col1:
-        with st.form("s"):
-            sn, sk = st.text_input("Nazwa"), st.number_input("Kwota")
-            if st.form_submit_button("Dodaj Stały"):
+        st.subheader("Opłaty Stałe")
+        with st.form("s", clear_on_submit=True):
+            sn, sk = st.text_input("Nazwa (np. Czynsz)"), st.number_input("Kwota")
+            if st.form_submit_button("Dodaj Stały Wydatek"):
                 oplaty_stale.append({"id": str(datetime.now().timestamp()), "nazwa": sn, "kwota": sk}); save_db("stale", oplaty_stale); st.rerun()
         for s in oplaty_stale:
             st.write(f"📌 {s['nazwa']}: {s['kwota']} zł")
             if st.button("Usuń", key=f"ds_{s['id']}"):
                 oplaty_stale = [x for x in oplaty_stale if x['id'] != s['id']]; save_db("stale", oplaty_stale); st.rerun()
     with col2:
-        with st.form("r"):
-            rn, rk, rs, re = st.text_input("Rata"), st.number_input("Kwota Raty"), st.date_input("Start"), st.date_input("Koniec")
-            if st.form_submit_button("Dodaj Ratę"):
+        st.subheader("Raty")
+        with st.form("r", clear_on_submit=True):
+            rn, rk = st.text_input("Nazwa (np. Auto)"), st.number_input("Kwota Raty")
+            rs, re = st.date_input("Miesiąc START"), st.date_input("Miesiąc KONIEC")
+            if st.form_submit_button("Zatwierdź Ratę"):
                 raty.append({"id": str(datetime.now().timestamp()), "nazwa": rn, "kwota": rk, "start": str(rs), "koniec": str(re)}); save_db("raty", raty); st.rerun()
         for r in raty:
             st.write(f"💳 {r['nazwa']}: {r['kwota']} zł")
