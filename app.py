@@ -7,7 +7,7 @@ from dateutil.relativedelta import relativedelta
 import calendar
 
 # --- KONFIGURACJA ---
-st.set_page_config(page_title="Budżet Pro Piotr & Natalia", page_icon="🏦", layout="wide")
+st.set_page_config(page_title="Budżet Pro - Piotr & Natalia", page_icon="🏦", layout="wide")
 
 # --- STYLIZACJA (WYSOKI KONTRAST) ---
 st.markdown("""
@@ -19,10 +19,11 @@ st.markdown("""
     .stExpander { border: 1px solid #555 !important; background-color: #1c1f26 !important; margin-bottom: 8px !important; }
     div[data-testid="stExpander"] p { color: white !important; font-size: 1.1em; font-weight: bold; }
     .shopping-card { background-color: #1c1f26; padding: 15px; border-radius: 10px; border-left: 5px solid #00ff88; margin-bottom: 10px; color: white !important; font-weight: bold; }
+    .alert-box { background-color: #3e0b0b; border: 2px solid #ff4b4b; padding: 15px; border-radius: 10px; text-align: center; margin-bottom: 15px; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- ZARZĄDZANIE DANYMI (Niezawodne ID) ---
+# --- ZARZĄDZANIE DANYMI ---
 FILES = {"data": "budzet_total.json", "shopping": "zakupy_total.json", "raty": "raty_total.json", "sejf": "sejf_total.json"}
 
 def load_data(key):
@@ -35,7 +36,6 @@ def save_data(data, key):
     with open(FILES[key], "w", encoding='utf-8') as f:
         json.dump(data, f, indent=4, ensure_ascii=False)
 
-# Inicjalizacja
 raw_all = load_data("data")
 raw_shop = load_data("shopping")
 raw_raty = load_data("raty")
@@ -43,7 +43,7 @@ raw_sejf = load_data("sejf") if load_data("sejf") else [{"Suma": 0.0}]
 
 # --- IKONY ZAKUPÓW ---
 def get_icon(name):
-    icons = {"mleko": "🥛", "ser": "🧀", "masło": "🧈", "chleb": "🍞", "buł": "🥖", "jaj": "🥚", "mięs": "🥩", "szynka": "🍖", "piw": "🍺", "wod": "💧", "sok": "🥤", "kawa": "☕", "herbata": "🍵", "pomid": "🍅", "ogór": "🥒", "ziem": "🥔", "owoc": "🍎", "papie": "🧻", "myd": "🧼", "płyn": "🧴", "pasta": "🪥", "karma": "🐾", "pieluchy": "👶"}
+    icons = {"mleko": "🥛", "ser": "🧀", "masło": "🧈", "chleb": "🍞", "buł": "🥖", "jaj": "🥚", "mięs": "🥩", "szynka": "🍖", "piw": "🍺", "wod": "💧", "sok": "🥤", "kawa": "☕", "pomid": "🍅", "ogór": "🥒", "ziem": "🥔", "owoc": "🍎", "papie": "🧻", "myd": "🧼", "pieluchy": "👶", "karma": "🐾"}
     for k, v in icons.items():
         if k in name.lower(): return v
     return "🛒"
@@ -61,34 +61,28 @@ msc_data = [x for x in raw_all if x['Miesiac_Ref'] == sel_msc]
 target_dt = datetime.strptime(sel_msc, "%Y-%m").date()
 
 # 800+
-dzieci = [date(2018, 8, 1), date(2022, 11, 1)]
-auto_800 = sum(800 for d in dzieci if target_dt < d + relativedelta(years=18))
+auto_800 = sum(800 for d in [date(2018, 8, 1), date(2022, 11, 1)] if target_dt < d + relativedelta(years=18))
 
 # Raty
-raty_msc = 0
-for r in raw_raty:
-    try:
-        s = datetime.strptime(r['Start'], '%Y-%m-%d').date()
-        k = datetime.strptime(r['Koniec'], '%Y-%m-%d').date()
-        if s.replace(day=1) <= target_dt <= k.replace(day=1):
-            raty_msc += r['Kwota']
-    except: continue
+raty_msc = sum(r['Kwota'] for r in raw_raty if datetime.strptime(r['Start'], '%Y-%m-%d').date().replace(day=1) <= target_dt <= datetime.strptime(r['Koniec'], '%Y-%m-%d').date().replace(day=1))
 
-# Sumy
 total_in = sum(x['Kwota'] for x in msc_data if x['Typ'] == "Przychod") + auto_800
 total_out = sum(x['Kwota'] for x in msc_data if x['Typ'] != "Przychod") + raty_msc
 wolne = total_in - total_out
 
-# Limit dzienny
 days_in_m = calendar.monthrange(target_dt.year, target_dt.month)[1]
 days_left = (days_in_m - datetime.now().day + 1) if sel_msc == curr_msc else 1
-limit_dzienny = wolne / max(days_left, 1)
+limit_dzienny = max(0, wolne / max(days_left, 1))
 
 # --- STRONA 1: PULPIT ---
 if page == "🏠 Pulpit":
+    # ALERT ŻYCIA POD KRESKĄ
+    if wolne < 0:
+        st.markdown(f"""<div class='alert-box'>🚨 <b>ŻYCIE POD KRESKĄ!</b><br>Brakuje: {abs(wolne):,.2f} zł. Deficyt pokrywany z Sejfu Globalnego.</div>""", unsafe_allow_html=True)
+
     c1, c2 = st.columns(2)
-    c1.metric("Limit na dziś", f"{max(0, limit_dzienny):,.2f} zł")
-    c2.metric("Oszczędności Razem", f"{raw_sejf[0]['Suma'] + sum(x['Kwota'] for x in raw_all if x['Typ'] == 'Fundusze Celowe'):,.2f} zł")
+    c1.metric("Limit na dziś", f"{limit_dzienny:,.2f} zł", delta=f"{wolne:,.2f} msc" if wolne < 0 else None, delta_color="inverse")
+    c2.metric("Sejf + Skarbonki", f"{raw_sejf[0]['Suma'] + sum(x['Kwota'] for x in raw_all if x['Typ'] == 'Fundusze Celowe') + (wolne if wolne < 0 else 0):,.2f} zł")
 
     st.divider()
     col_add, col_list = st.columns([1, 1.5])
@@ -105,7 +99,6 @@ if page == "🏠 Pulpit":
                 save_data(raw_all, "data"); st.rerun()
 
     with col_list:
-        # SEKCA WPŁYWÓW
         st.markdown(f"<div class='header-wplywy'>💰 WPŁYWY: {total_in:,.2f} zł</div>", unsafe_allow_html=True)
         if auto_800 > 0: st.info(f"✨ Automatyczne 800+: {auto_800} zł")
         for x in raw_all[::-1]:
@@ -113,41 +106,36 @@ if page == "🏠 Pulpit":
                 with st.expander(f"➕ {x['Kwota']} zł | {x['Opis']}"):
                     c1, c2 = st.columns(2)
                     if c1.button("🗑️ Usuń", key=f"del_{x['Id']}"):
-                        raw_all = [i for i in raw_all if i['Id'] != x['Id']]
-                        save_data(raw_all, "data"); st.rerun()
-                    if c2.button("✏️ Edytuj", key=f"ed_{x['Id']}"):
-                        st.session_state[f"mode_{x['Id']}"] = True
+                        raw_all = [i for i in raw_all if i['Id'] != x['Id']]; save_data(raw_all, "data"); st.rerun()
+                    if c2.button("✏️ Edytuj", key=f"ed_{x['Id']}"): st.session_state[f"mode_{x['Id']}"] = True
                     if st.session_state.get(f"mode_{x['Id']}"):
                         new_k = st.number_input("Kwota", value=float(x['Kwota']), key=f"k_{x['Id']}")
                         new_o = st.text_input("Opis", value=x['Opis'], key=f"o_{x['Id']}")
                         if st.button("Zapisz", key=f"s_{x['Id']}"):
-                            for item in raw_all:
-                                if item['Id'] == x['Id']: item['Kwota'], item['Opis'] = new_k, new_o
+                            for i in raw_all:
+                                if i['Id'] == x['Id']: i['Kwota'], i['Opis'] = new_k, new_o
                             save_data(raw_all, "data"); del st.session_state[f"mode_{x['Id']}"]; st.rerun()
 
-        # SEKCJA WYDATKÓW
         st.markdown(f"<div class='header-wydatki'>💸 WYDATKI: {total_out:,.2f} zł</div>", unsafe_allow_html=True)
-        if raty_msc > 0: st.warning(f"💳 Raty: {raty_msc} zł")
+        if raty_msc > 0: st.warning(f"💳 Raty w tym msc: {raty_msc} zł")
         for x in raw_all[::-1]:
             if x['Miesiac_Ref'] == sel_msc and x['Typ'] != "Przychod":
                 with st.expander(f"➖ {x['Kwota']} zł | {x['Opis']} ({x['Typ']})"):
                     c1, c2 = st.columns(2)
                     if c1.button("🗑️ Usuń", key=f"del_{x['Id']}"):
-                        raw_all = [i for i in raw_all if i['Id'] != x['Id']]
-                        save_data(raw_all, "data"); st.rerun()
-                    if c2.button("✏️ Edytuj", key=f"ed_{x['Id']}"):
-                        st.session_state[f"mode_{x['Id']}"] = True
+                        raw_all = [i for i in raw_all if i['Id'] != x['Id']]; save_data(raw_all, "data"); st.rerun()
+                    if c2.button("✏️ Edytuj", key=f"ed_{x['Id']}"): st.session_state[f"mode_{x['Id']}"] = True
                     if st.session_state.get(f"mode_{x['Id']}"):
                         new_k = st.number_input("Kwota", value=float(x['Kwota']), key=f"k_{x['Id']}")
                         new_o = st.text_input("Opis", value=x['Opis'], key=f"o_{x['Id']}")
                         if st.button("Zapisz", key=f"s_{x['Id']}"):
-                            for item in raw_all:
-                                if item['Id'] == x['Id']: item['Kwota'], item['Opis'] = new_k, new_o
+                            for i in raw_all:
+                                if i['Id'] == x['Id']: i['Kwota'], i['Opis'] = new_k, new_o
                             save_data(raw_all, "data"); del st.session_state[f"mode_{x['Id']}"]; st.rerun()
 
 # --- STRONA 2: RATY ---
 elif page == "💳 Raty i Stałe":
-    st.subheader("💳 Harmonogram Rat")
+    st.subheader("💳 Zarządzaj Ratami")
     with st.form("rata_f"):
         n, k = st.text_input("Nazwa raty"), st.number_input("Kwota miesięczna")
         s, e = st.date_input("Start"), st.date_input("Koniec")
@@ -157,35 +145,30 @@ elif page == "💳 Raty i Stałe":
     for r in raw_raty:
         st.info(f"📌 **{r['Nazwa']}**: {r['Kwota']} zł (do {r['Koniec']})")
         if st.button("Usuń", key=f"dr_{r['Id']}"):
-            raw_raty = [i for i in raw_raty if i['Id'] != r['Id']]
-            save_data(raw_raty, "raty"); st.rerun()
+            raw_raty = [i for i in raw_raty if i['Id'] != r['Id']]; save_data(raw_raty, "raty"); st.rerun()
 
 # --- STRONA 3: ZAKUPY ---
 elif page == "🛒 Lista Zakupów":
     st.subheader("🛒 Zakupy")
-    new_p = st.text_input("Co kupić?")
+    new_p = st.text_input("Co dopisać?")
     if st.button("Dodaj ➕"):
         raw_shop.append({"Id": str(datetime.now().timestamp()), "Item": f"{get_icon(new_p)} {new_p}", "Time": datetime.now().strftime("%H:%M")})
         save_data(raw_shop, "shopping"); st.rerun()
     for p in raw_shop:
         c1, c2 = st.columns([5,1])
-        c1.markdown(f"<div class='shopping-card'>{p['Item']} <br><small>Dodano: {p['Time']}</small></div>", unsafe_allow_html=True)
+        c1.markdown(f"<div class='shopping-card'>{p['Item']} <br><small>Zapisano: {p['Time']}</small></div>", unsafe_allow_html=True)
         if c2.button("✅", key=p['Id']):
-            raw_shop = [i for i in raw_shop if i['Id'] != p['Id']]
-            save_data(raw_shop, "shopping"); st.rerun()
+            raw_shop = [i for i in raw_shop if i['Id'] != p['Id']]; save_data(raw_shop, "shopping"); st.rerun()
 
 # --- STRONA 4: SKARBONKI ---
 elif page == "💰 Skarbonki":
     st.subheader("💰 Twój Sejf i Cele")
-    nowy_sejf = st.number_input("Sejf Globalny (gotówka/konto)", value=float(raw_sejf[0]['Suma']))
+    nowy_sejf = st.number_input("Sejf Globalny (stan realny)", value=float(raw_sejf[0]['Suma']))
     if st.button("Aktualizuj Sejf"):
-        raw_sejf[0]['Suma'] = nowy_sejf
-        save_data(raw_sejf, "sejf"); st.rerun()
-    
+        raw_sejf[0]['Suma'] = nowy_sejf; save_data(raw_sejf, "sejf"); st.rerun()
     st.divider()
     cele = {}
     for x in raw_all:
-        if x['Typ'] == "Fundusze Celowe":
-            cele[x['Opis']] = cele.get(x['Opis'], 0) + x['Kwota']
+        if x['Typ'] == "Fundusze Celowe": cele[x['Opis']] = cele.get(x['Opis'], 0) + x['Kwota']
     for n, k in cele.items():
         st.success(f"📂 {n}: **{k:,.2f} zł**")
