@@ -7,55 +7,78 @@ import calendar
 from dateutil.relativedelta import relativedelta
 import plotly.express as px
 
-# --- KONFIGURACJA I OSTATECZNA NAPRAWA KONTRASTU (v3.9) ---
-st.set_page_config(page_title="Budżet Rodzinny 3.9", layout="wide")
+# --- KONFIGURACJA I STYL BANKU MILLENNIUM (v4.0) ---
+st.set_page_config(page_title="Budżet Domowy 4.0", layout="wide")
 
 st.markdown("""
     <style>
-    :root { color-scheme: dark; }
-    .main { background-color: #0e1117; color: white; }
+    /* Globalne tło - jasny styl bankowy */
+    .main { background-color: #f7f7f7; color: #333333; }
     
-    /* Wyraźne kafelki Metric */
+    /* Styl kafelków Metric - białe karty z cieniem */
     [data-testid="stMetric"] {
-        background-color: #1c1f26;
-        padding: 15px;
-        border-radius: 10px;
-        border: 1px solid #333;
+        background-color: #ffffff;
+        padding: 20px;
+        border-radius: 15px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+        border: 1px solid #eeeeee;
     }
-    [data-testid="stMetricLabel"] > div { color: #ffffff !important; opacity: 1 !important; font-size: 1rem !important; }
-    [data-testid="stMetricValue"] > div { color: #00ff88 !important; font-weight: bold !important; }
+    
+    /* Napisy w metrykach */
+    [data-testid="stMetricLabel"] > div { color: #666666 !important; font-size: 0.9rem !important; font-weight: 500; }
+    [data-testid="stMetricValue"] > div { color: #eb0029 !important; font-weight: 800 !important; }
 
-    /* Pola Formularza */
+    /* Pola formularzy - nowoczesny, czysty wygląd */
     input, select, textarea, div[data-baseweb="input"], div[data-baseweb="select"] {
-        background-color: #262730 !important;
-        color: #ffffff !important;
+        background-color: #ffffff !important;
+        color: #333333 !important;
+        border: 1px solid #dddddd !important;
+        border-radius: 10px !important;
     }
-    input[type="date"] { color: #ffffff !important; background-color: #262730 !important; }
-    ::-webkit-calendar-picker-indicator { filter: invert(1); cursor: pointer; }
+    
+    /* Etykiety pól - kolor bankowy */
+    label p { color: #eb0029 !important; font-weight: 600 !important; }
 
-    /* Etykiety i Przyciski */
-    label p { color: #00ff88 !important; font-weight: bold !important; font-size: 1.1rem !important; }
+    /* Główny przycisk - Róż Millennium */
     .stButton>button {
         width: 100%;
-        background-color: #00ff88 !important;
-        color: #0e1117 !important;
+        background-color: #eb0029 !important;
+        color: #ffffff !important;
         font-weight: bold !important;
+        border-radius: 25px !important;
         border: none !important;
-        height: 3em;
-        margin-top: 10px;
+        height: 3.5em;
+        transition: 0.3s;
     }
-    
+    .stButton>button:hover {
+        background-color: #c20022 !important;
+        box-shadow: 0 4px 12px rgba(235, 0, 41, 0.3);
+    }
+
+    /* Expander (historia) - biały z różowym akcentem */
+    .streamlit-expanderHeader {
+        background-color: #ffffff !important;
+        border-radius: 10px !important;
+        border: 1px solid #eeeeee !important;
+    }
+
+    /* Alert deficytu */
     .minus-alert { 
-        background-color: #3e0b0b; 
-        border: 2px solid #ff4b4b; 
+        background-color: #fff0f0; 
+        border: 1px solid #eb0029; 
         padding: 15px; 
-        border-radius: 10px; 
+        border-radius: 12px; 
         text-align: center; 
         font-weight: bold;
-        color: white;
+        color: #eb0029;
         margin-bottom: 20px;
     }
-    .st-ae { color: white !important; }
+
+    /* Sidebar - elegancki biały */
+    section[data-testid="stSidebar"] {
+        background-color: #ffffff !important;
+        border-right: 1px solid #eeeeee;
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -86,19 +109,16 @@ def oblicz_800plus(data_widoku):
     if data_widoku < zosia_ur + relativedelta(years=18): suma += 800
     return suma
 
-# --- SIDEBAR (ZAKRES OD GRUDNIA 2025) ---
+# --- SIDEBAR ---
 with st.sidebar:
-    st.title("🏦 Budżet 3.9")
-    # Zakres: start grudzień 2025, długość 36 miesięcy
+    st.markdown(f"<h1 style='color: #eb0029; text-align: center;'>Millennium</h1>", unsafe_allow_html=True)
     daty_lista = pd.date_range(start="2025-12-01", periods=36, freq='MS').strftime("%Y-%m").tolist()
-    
     try:
         domyslny_index = daty_lista.index(datetime.now().strftime("%Y-%m"))
     except:
         domyslny_index = 0
-        
     wybrany_miesiac = st.selectbox("Wybierz Miesiąc", daty_lista, index=domyslny_index)
-    menu = st.radio("Nawigacja", ["🏠 Pulpit", "⚙️ Stałe i Raty", "🛒 Lista Zakupów", "📊 Statystyki"])
+    menu = st.radio("Menu", ["🏠 Pulpit", "⚙️ Stałe i Raty", "🛒 Lista Zakupów", "📊 Statystyki"])
 
 sel_dt = datetime.strptime(wybrany_miesiac, "%Y-%m").date()
 suma_800 = oblicz_800plus(sel_dt)
@@ -116,87 +136,84 @@ kasa_total = kasa_oszcz['nadwyzki'] + sum(t['kwota'] for t in transakcje if t['t
 # --- PULPIT ---
 if menu == "🏠 Pulpit":
     c1, c2 = st.columns(2)
-    c1.metric("Portfel (Miesiąc)", f"{saldo:,.2f} zł")
-    c2.metric("Sejf (Oszczędności)", f"{kasa_total:,.2f} zł")
+    c1.metric("DOSTĘPNE ŚRODKI", f"{saldo:,.2f} zł")
+    c2.metric("OSZCZĘDNOŚCI", f"{kasa_total:,.2f} zł")
     
     if saldo < 0:
-        st.markdown(f"<div class='minus-alert'>🚨 Deficyt: {abs(saldo):,.2f} zł</div>", unsafe_allow_html=True)
-        if st.button("🆘 Ratuj budżet z Sejfu"):
+        st.markdown(f"<div class='minus-alert'>Poniżej zera: {abs(saldo):,.2f} zł</div>", unsafe_allow_html=True)
+        if st.button("PRZELEJ Z OSZCZĘDNOŚCI"):
             kasa_oszcz['nadwyzki'] -= abs(saldo)
             transakcje.append({"id": str(datetime.now().timestamp()), "miesiac": wybrany_miesiac, "typ": "Wynagrodzenie", "kwota": abs(saldo), "opis": "🆘 Ratunek z Sejfu", "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M")})
             save_db("kasa", kasa_oszcz); save_db("transakcje", transakcje); st.rerun()
 
-    st.divider()
+    st.markdown("<br>", unsafe_allow_html=True)
     with st.form("dodaj", clear_on_submit=True):
-        st.subheader("➕ Nowa Operacja")
+        st.subheader("Nowa transakcja")
         t_typ = st.selectbox("Kategoria", ["Wydatek Zmienny", "Wynagrodzenie", "Oszczędność Celowa"])
-        t_kw = st.number_input("Kwota (zł)", min_value=0.0)
-        t_op = st.text_input("Opis")
-        if st.form_submit_button("ZAPISZ"):
+        t_kw = st.number_input("Kwota", min_value=0.0)
+        t_op = st.text_input("Tytułem")
+        if st.form_submit_button("ZATWIERDŹ"):
             transakcje.append({"id": str(datetime.now().timestamp()), "miesiac": wybrany_miesiac, "typ": t_typ, "kwota": t_kw, "opis": t_op, "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M")})
             save_db("transakcje", transakcje); st.rerun()
 
-    if st.button("🏁 Zamknij miesiąc (Przenieś saldo do Sejfu)"):
+    if st.button("ZAMKNIJ MIESIĄC (OSZCZĘDŹ NADWYŻKĘ)"):
         if saldo > 0:
             kasa_oszcz['nadwyzki'] += saldo
             transakcje.append({"id": str(datetime.now().timestamp()), "miesiac": wybrany_miesiac, "typ": "Wydatek Zmienny", "kwota": saldo, "opis": "🏁 Zamknięcie", "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M")})
             save_db("kasa", kasa_oszcz); save_db("transakcje", transakcje); st.rerun()
 
-    st.subheader("📋 Historia wpisów")
+    st.subheader("Ostatnie operacje")
     for t in [x for x in transakcje if x['miesiac'] == wybrany_miesiac][::-1]:
         with st.expander(f"{t['typ']} | {t['kwota']} zł | {t['opis']}"):
-            if st.button("🗑️ Usuń", key=f"del_{t['id']}"):
+            if st.button("USUŃ", key=f"del_{t['id']}"):
                 transakcje = [x for x in transakcje if x['id'] != t['id']]; save_db("transakcje", transakcje); st.rerun()
 
-# --- STAŁE I RATY ---
+# --- RESZTA SEKCJI ---
 elif menu == "⚙️ Stałe i Raty":
     col1, col2 = st.columns(2)
     with col1:
-        st.subheader("📌 Opłaty Stałe")
-        with st.form("s", clear_on_submit=True):
-            sn, sk = st.text_input("Nazwa"), st.number_input("Kwota", min_value=0.0)
-            if st.form_submit_button("DODAJ OPŁATĘ"):
+        st.subheader("Stałe zlecenia")
+        with st.form("s"):
+            sn, sk = st.text_input("Nazwa"), st.number_input("Kwota")
+            if st.form_submit_button("DODAJ"):
                 oplaty_stale.append({"id": str(datetime.now().timestamp()), "nazwa": sn, "kwota": sk}); save_db("stale", oplaty_stale); st.rerun()
         for s in oplaty_stale:
-            st.write(f"• {s['nazwa']}: {s['kwota']} zł")
-            if st.button("Usuń", key=f"ds_{s['id']}"):
+            st.write(f"📌 {s['nazwa']}: {s['kwota']} zł")
+            if st.button("USUŃ", key=f"ds_{s['id']}"):
                 oplaty_stale = [x for x in oplaty_stale if x['id'] != s['id']]; save_db("stale", oplaty_stale); st.rerun()
     with col2:
-        st.subheader("💳 Raty")
-        with st.form("r", clear_on_submit=True):
-            rn, rk = st.text_input("Nazwa"), st.number_input("Kwota", min_value=0.0)
+        st.subheader("Twoje raty")
+        with st.form("r"):
+            rn, rk = st.text_input("Nazwa"), st.number_input("Kwota")
             rs, re = st.date_input("Start"), st.date_input("Koniec")
             if st.form_submit_button("DODAJ RATĘ"):
                 raty.append({"id": str(datetime.now().timestamp()), "nazwa": rn, "kwota": rk, "start": str(rs), "koniec": str(re)}); save_db("raty", raty); st.rerun()
         for r in raty:
-            st.write(f"• {r['nazwa']}: {r['kwota']} zł (do {r['koniec']})")
-            if st.button("Usuń", key=f"dr_{r['id']}"):
+            st.write(f"💳 {r['nazwa']}: {r['kwota']} zł")
+            if st.button("USUŃ", key=f"dr_{r['id']}"):
                 raty = [x for x in raty if x['id'] != r['id']]; save_db("raty", raty); st.rerun()
 
-# --- ZAKUPY ---
 elif menu == "🛒 Lista Zakupów":
-    with st.form("zak", clear_on_submit=True):
+    with st.form("z"):
         p = st.text_input("Produkt")
         if st.form_submit_button("DODAJ"):
             lista_zakupow.append({"id": str(datetime.now().timestamp()), "nazwa": p})
             save_db("zakupy", lista_zakupow); st.rerun()
     for p in lista_zakupow[::-1]:
         c1, c2 = st.columns([4, 1])
-        c1.info(f"🛒 {p['nazwa']}")
-        if c2.button("🗑️", key=f"dz_{p['id']}"):
+        c1.write(f"🛒 **{p['nazwa']}**")
+        if c2.button("X", key=f"dz_{p['id']}"):
             lista_zakupow = [x for x in lista_zakupow if x['id'] != p['id']]; save_db("zakupy", lista_zakupow); st.rerun()
 
-# --- STATYSTYKI ---
 elif menu == "📊 Statystyki":
-    st.header(f"📊 Statystyki {sel_dt.year}")
+    st.header("Analiza wydatków")
     df = pd.DataFrame(transakcje)
     if not df.empty:
         dzis = datetime.now()
         ile_msc = dzis.month if sel_dt.year == dzis.year else (12 if sel_dt.year < dzis.year else 0)
         s800 = oblicz_800plus(sel_dt) * ile_msc
-        dochody_rok = df[(df['typ']=="Wynagrodzenie") & (~df['opis'].str.contains("Ratunek", na=False)) & (df['miesiac'].str.startswith(str(sel_dt.year)))]['kwota'].sum() + s800
-        st.metric(f"Dochody {sel_dt.year}", f"{dochody_rok:,.2f} zł")
-        
-        df_wyd = df[~df['opis'].str.contains("Zamknięcie", na=False) & (df['typ'] != "Wynagrodzenie") & (df['miesiac'].str.startswith(str(sel_dt.year)))]
-        if not df_wyd.empty:
-            st.plotly_chart(px.pie(df_wyd, values='kwota', names='typ', title="Twoje Wydatki"))
+        dochody = df[(df['typ']=="Wynagrodzenie") & (~df['opis'].str.contains("Ratunek", na=False)) & (df['miesiac'].str.startswith(str(sel_dt.year)))]['kwota'].sum() + s800
+        st.metric(f"DOCHODY {sel_dt.year}", f"{dochody:,.2f} zł")
+        df_w = df[~df['opis'].str.contains("Zamknięcie", na=False) & (df['typ'] != "Wynagrodzenie") & (df['miesiac'].str.startswith(str(sel_dt.year)))]
+        if not df_w.empty:
+            st.plotly_chart(px.pie(df_w, values='kwota', names='typ', color_discrete_sequence=['#eb0029', '#ff4d6d', '#ff85a1', '#ffb3c1']))
